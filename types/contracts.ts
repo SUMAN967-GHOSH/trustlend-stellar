@@ -128,6 +128,10 @@ export interface LoanRecord {
   escrowId: number;
   /** 1 % of interest, in stroops */
   platformFee: bigint;
+  /** Collateral asset address */
+  collateralAsset: string;
+  /** Collateral amount in asset's smallest unit */
+  collateralAmount: bigint;
 }
 
 export interface PaymentRecord {
