@@ -247,7 +247,7 @@ export async function simulatePreview(
     const sorobanResources = txData.resources();
     resources = {
       instructions: sorobanResources.instructions(),
-      readBytes: sorobanResources.readBytes(),
+      readBytes: sorobanResources.diskReadBytes(),
       writeBytes: sorobanResources.writeBytes(),
       ledgerFootprintEntries: sorobanResources.footprint().readWrite().length,
     };
