@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { clsx } from "clsx";
 import type { SimulationResult } from "@/lib/stellar/simulation";
 import { Progress } from "@/components/ui/progress";
 
@@ -19,7 +18,7 @@ function AnimatedValue({ value, suffix = "" }: { value: number; suffix?: string 
 
   useEffect(() => {
     if (value === 0) {
-      setDisplay(0);
+      frameRef.current = requestAnimationFrame(() => setDisplay(0));
       return;
     }
     const duration = 600;

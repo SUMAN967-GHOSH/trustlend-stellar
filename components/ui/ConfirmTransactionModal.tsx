@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { clsx } from "clsx";
+
 import { Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { SimulationPreview } from "@/components/ui/SimulationPreview";
 import { simulatePreview } from "@/lib/stellar/simulation";
@@ -121,7 +121,7 @@ export function ConfirmTransactionModal({
     return () => {
       cancelled = true;
     };
-  }, [open, action?.contractId, action?.method, action?.args, action?.callerAddress]);
+  }, [open, action]);
 
   // Re-simulate on re-open
   useEffect(() => {
@@ -138,7 +138,7 @@ export function ConfirmTransactionModal({
 
   const isSimFailed = simResult && !simResult.success;
   const hasDetails = detailsEntries.length > 0;
-  const actionColor = isSimFailed ? "rgba(255,77,77,1)" : "#a78bfa";
+
 
   return (
     <div

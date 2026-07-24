@@ -7,7 +7,7 @@ import {
   Address,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
-import type { CallContractOptions } from "@/lib/stellar/soroban";
+
 
 export const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
@@ -56,17 +56,13 @@ function u32ToScVal(value: number): xdr.ScVal {
   return nativeToScVal(value, { type: "u32" });
 }
 
-function u64ToScVal(value: bigint): xdr.ScVal {
-  return nativeToScVal(value, { type: "u64" });
-}
+
 
 function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: "string" });
 }
 
-function enumToScVal(variant: string): xdr.ScVal {
-  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
-}
+
 
 export function encodeArg(arg: unknown): xdr.ScVal {
   if (typeof arg === "string" && arg.startsWith("G") && arg.length === 56) {
