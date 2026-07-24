@@ -3,15 +3,22 @@
 import { useEffect, useCallback, useState } from "react";
 import { Loader2, ShieldCheck, AlertCircle, Rocket } from "lucide-react";
 import { ReputationContract } from "@/lib/contracts";
+import { useTransactionSimulation } from "@/lib/stellar/use-transaction-simulation";
+import { ConfirmTransactionModal } from "@/components/ui/ConfirmTransactionModal";
 
 interface SorobanProfileCardProps {
   walletAddress: string | null;
 }
 
+const REPUTATION_CONTRACT_ID =
+  process.env.NEXT_PUBLIC_REPUTATION_CONTRACT_ID ?? "";
+
 export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
   const [profileExists, setProfileExists] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const tx = useTransactionSimulation();
 
   const checkProfile = useCallback(async () => {
     if (!walletAddress) return;
@@ -20,7 +27,6 @@ export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
       setProfileExists(exists);
     } catch (err) {
       console.error("[TrustLend] Failed to check on-chain profile:", err);
-      // We don't set error here to avoid blocking UI with noise
     }
   }, [walletAddress]);
 
@@ -32,10 +38,27 @@ export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
 
   const handleInitialize = async () => {
     if (!walletAddress) return;
+    tx.preview({
+      label: "Initialize On-Chain Profile",
+      contractId: REPUTATION_CONTRACT_ID,
+      method: "init_borrower",
+      args: [walletAddress],
+      callerAddress: walletAddress,
+      details: {
+        Address: walletAddress,
+        Action: "Create borrower reputation profile",
+      },
+    });
+  };
+
+  const handleConfirmInit = async () => {
+    if (!walletAddress) return;
     setLoading(true);
     setError(null);
     try {
-      await ReputationContract.initBorrowerProfile(walletAddress);
+      await tx.confirm(async () => {
+        await ReputationContract.initBorrowerProfile(walletAddress);
+      });
       setProfileExists(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize profile");
@@ -65,40 +88,51 @@ export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
   }
 
   return (
-    <article className="workspace-card" style={{ border: "1px solid rgba(126, 47, 208, 0.2)", background: "rgba(126, 47, 208, 0.02)" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem" }}>
-        <div style={{ background: "rgba(126, 47, 208, 0.1)", padding: "0.6rem", borderRadius: "0.5rem", color: "#7e2fd0" }}>
-          <Rocket size={20} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>Initialize On-Chain Profile</h3>
-          <p style={{ fontSize: "0.85rem", opacity: 0.7, lineHeight: 1.5, marginBottom: "1rem" }}>
-            Your wallet is connected, but your reputation profile hasn&apos;t been created on Stellar yet. 
-            This is required to apply for micro-loans.
-          </p>
+    <>
+      <article className="workspace-card" style={{ border: "1px solid rgba(126, 47, 208, 0.2)", background: "rgba(126, 47, 208, 0.02)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem" }}>
+          <div style={{ background: "rgba(126, 47, 208, 0.1)", padding: "0.6rem", borderRadius: "0.5rem", color: "#7e2fd0" }}>
+            <Rocket size={20} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>Initialize On-Chain Profile</h3>
+            <p style={{ fontSize: "0.85rem", opacity: 0.7, lineHeight: 1.5, marginBottom: "1rem" }}>
+              Your wallet is connected, but your reputation profile hasn&apos;t been created on Stellar yet. 
+              This is required to apply for micro-loans.
+            </p>
 
-          {error && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#ff6b6b", fontSize: "0.75rem", marginBottom: "0.75rem" }}>
-              <AlertCircle size={14} />
-              <span>{error}</span>
-            </div>
-          )}
+            {error && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#ff6b6b", fontSize: "0.75rem", marginBottom: "0.75rem" }}>
+                <AlertCircle size={14} />
+                <span>{error}</span>
+              </div>
+            )}
 
-          <button 
-            onClick={handleInitialize}
-            disabled={loading}
-            className="workspace-button workspace-button--primary"
-            style={{ height: "auto", padding: "0.6rem 1rem", fontSize: "0.85rem" }}
-          >
-            {loading ? (
-              <>
-                <Loader2 size={14} className="animate-spin" style={{ marginRight: "0.5rem" }} />
-                Initializing...
-              </>
-            ) : "Create On-Chain Profile"}
-          </button>
+            <button 
+              onClick={handleInitialize}
+              disabled={tx.isModalOpen || loading}
+              className="workspace-button workspace-button--primary"
+              style={{ height: "auto", padding: "0.6rem 1rem", fontSize: "0.85rem" }}
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" style={{ marginRight: "0.5rem" }} />
+                  Initializing...
+                </>
+              ) : "Create On-Chain Profile"}
+            </button>
+          </div>
         </div>
-      </div>
-    </article>
+      </article>
+
+      {/* Simulation preview modal */}
+      <ConfirmTransactionModal
+        open={tx.isModalOpen}
+        onClose={tx.dismiss}
+        onConfirm={handleConfirmInit}
+        action={tx.pendingAction}
+        confirming={tx.isConfirming || loading}
+      />
+    </>
   );
 }

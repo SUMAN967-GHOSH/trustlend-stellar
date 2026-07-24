@@ -10,11 +10,13 @@ import {
 
 interface LoanApplicationFormProps {
   maxAmount: number;
-  onSubmit: (amount: number, duration: number) => Promise<void>;
+  onSubmit: (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => Promise<void>;
 }
 export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationFormProps) {
   const [amount, setAmount] = useState("");
   const [duration, setDuration] = useState("60");
+  const [collateralAsset, setCollateralAsset] = useState("");
+  const [collateralAmount, setCollateralAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,13 +27,24 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
 
     try {
       const amountNum = parseFloat(amount);
+      const collateralAmountNum = parseFloat(collateralAmount);
       if (!amountNum || amountNum <= 0 || amountNum > maxAmount) {
         setError(`Amount must be between 1 and ${maxAmount}`);
         return;
       }
-      await onSubmit(amountNum, parseInt(duration));
+      if (!collateralAsset) {
+        setError("Please select a collateral asset");
+        return;
+      }
+      if (!collateralAmountNum || collateralAmountNum <= 0) {
+        setError("Collateral amount must be positive");
+        return;
+      }
+      await onSubmit(amountNum, parseInt(duration), collateralAsset, collateralAmountNum);
       setAmount("");
       setDuration("60");
+      setCollateralAsset("");
+      setCollateralAmount("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit application");
     } finally {
@@ -72,14 +85,31 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
         </select>
       </div>
 
-      {/* TODO (RWA Collateral UI Integration):
-          1. Collateral Deposit Selection List:
-             - Add a dropdown or card selection interface here.
-             - Render the tokenized asset logo (e.g. gold bullion image or treasury bill flag icon).
-             - Show RWA token info (asset name, token code XAU/USTB, current price feed rate, and required LTV margin).
-          2. Required Collateral Calculation:
-             - Display estimated collateral needed based on selected asset price and requested loan amount.
-      */}
+      <div>
+        <label className="workspace-label">Collateral Asset Address</label>
+        <input
+          type="text"
+          value={collateralAsset}
+          onChange={(e) => setCollateralAsset(e.target.value)}
+          placeholder="Enter collateral asset address"
+          className="workspace-input"
+          disabled={loading}
+        />
+      </div>
+
+      <div>
+        <label className="workspace-label">Collateral Amount</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={collateralAmount}
+          onChange={(e) => setCollateralAmount(e.target.value)}
+          placeholder="Enter collateral amount"
+          className="workspace-input"
+          disabled={loading}
+        />
+      </div>
 
       {error && <p className="workspace-error">{error}</p>}
 
@@ -234,13 +264,13 @@ export function BorrowerForms({
   const [, setSorobanLoading] = useState(false);
   const pendingLoans = loans.filter((loan) => String(loan.status) === "requested");
 
-  const handleLoanApplication = async (amount: number, duration: number) => {
+  const handleLoanApplication = async (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => {
     setSorobanLoading(true);
     try {
       const response = await fetch("/api/loans/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default" }),
+        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default", collateral_asset: collateralAsset, collateral_amount: collateralAmount }),
       });
 
       if (!response.ok) {
@@ -267,13 +297,16 @@ export function BorrowerForms({
           ]);
 
           const amountStroops = xlmToStroops(amount);
+          const collateralAmountStroops = xlmToStroops(collateralAmount); // assuming same decimals as XLM for now
 
           await LendingContract.createLoanRequest(
             walletAddress,
             amountStroops,
             duration,
             onChainRate,
-            onChainMax
+            onChainMax,
+            collateralAsset,
+            collateralAmountStroops
           );
 
           console.log("[TrustLend] Soroban loan request recorded.");
