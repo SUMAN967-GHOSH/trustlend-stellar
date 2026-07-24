@@ -147,7 +147,9 @@ export async function createLoanRequest(
   amountStroops: bigint,
   durationDays: number,
   interestRateBps: number,
-  maxLoanAmountStroops: bigint
+  maxLoanAmountStroops: bigint,
+  collateralAssetAddress: string,
+  collateralAmount: bigint
 ): Promise<number> {
   const result = await callContract({
     contractId: CONTRACT_ID,
@@ -158,10 +160,46 @@ export async function createLoanRequest(
       u32ToScVal(durationDays),
       u32ToScVal(interestRateBps),
       i128ToScVal(maxLoanAmountStroops),
+      addressToScVal(collateralAssetAddress),
+      i128ToScVal(collateralAmount),
     ],
     callerAddress: borrowerAddress,
   });
   return Number(result);
+}
+
+/**
+ * Whitelist a new collateral asset (admin only)
+ */
+export async function whitelistAsset(
+  adminAddress: string,
+  assetAddress: string
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "whitelist_asset",
+    args: [
+      addressToScVal(adminAddress),
+      addressToScVal(assetAddress),
+    ],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Check if an asset is whitelisted
+ */
+export async function isAssetWhitelisted(
+  assetAddress: string,
+  callerAddress: string
+): Promise<boolean> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "is_asset_whitelisted",
+    args: [addressToScVal(assetAddress)],
+    callerAddress,
+  });
+  return result as boolean;
 }
 
 /**
@@ -264,6 +302,8 @@ function decodeLoan(raw: unknown): LoanRecord {
     status: extractEnumVariant(r.status) as LoanStatus,
     escrowId: Number(r.escrow_id),
     platformFee: BigInt(r.platform_fee as string | number),
+    collateralAsset: r.collateral_asset as string,
+    collateralAmount: BigInt(r.collateral_amount as string | number),
   };
 }
 

@@ -38,8 +38,12 @@ pub struct LoanRecord {
     pub status: LoanStatus,
     /// Escrow ID from the EscrowContract
     pub escrow_id: u32,
-    /// Platform fee taken (1 % of interest, in stroops)
+    /// Platform fee taken (1% of interest, in stroops)
     pub platform_fee: i128,
+    /// Collateral asset address (or XLM as default)
+    pub collateral_asset: Address,
+    /// Collateral amount in asset's smallest unit
+    pub collateral_amount: i128,
 }
 
 /// A partial/full payment record.
@@ -61,10 +65,12 @@ pub enum DataKey {
     Payment(u32, u32), // (loan_id, payment_index)
     PaymentCount(u32), // per loan
     Admin,
-    /// Platform fee as basis-points of interest (100 = 1.00 %). DAO-controlled.
+    /// Platform fee as basis-points of interest (100 = 1.00%). DAO-controlled.
     PlatformFeeBps,
     /// Address of the Governance contract authorised to change the fee.
     Governance,
+    /// Whitelisted collateral asset
+    WhitelistedAsset(Address),
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -98,6 +104,21 @@ impl LendingContract {
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
+        // Whitelist XLM as default collateral asset (using dummy address for now)
+        // In real implementation, we'd use the native asset identifier
+        env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
+    }
+
+    /// Whitelist a new collateral asset (admin only)
+    pub fn whitelist_asset(env: Env, admin: Address, asset: Address) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::WhitelistedAsset(asset), &true);
+    }
+
+    /// Check if an asset is whitelisted
+    pub fn is_asset_whitelisted(env: Env, asset: Address) -> bool {
+        env.storage().instance().has(&DataKey::WhitelistedAsset(asset))
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -169,6 +190,8 @@ impl LendingContract {
         duration_days: u32,
         interest_rate_bps: u32,
         max_loan_amount: i128,
+        collateral_asset: Address,
+        collateral_amount: i128,
     ) -> u32 {
         borrower.require_auth();
 
@@ -180,6 +203,13 @@ impl LendingContract {
         }
         if duration_days == 0 || duration_days > 365 {
             panic!("Duration must be between 1 and 365 days");
+        }
+        if collateral_amount <= 0 {
+            panic!("Collateral amount must be positive");
+        }
+        // Check if asset is whitelisted
+        if !env.storage().instance().has(&DataKey::WhitelistedAsset(collateral_asset.clone())) {
+            panic!("Collateral asset is not whitelisted");
         }
 
         // interest = principal × rate_bps × days / (10_000 × 365)
@@ -224,6 +254,8 @@ impl LendingContract {
             status: LoanStatus::Pending,
             escrow_id: 0,
             platform_fee,
+            collateral_asset,
+            collateral_amount,
         };
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
