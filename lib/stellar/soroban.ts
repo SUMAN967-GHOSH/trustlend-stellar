@@ -57,6 +57,11 @@ export function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: "string" });
 }
 
+/** Encode raw bytes (e.g. flash-loan callback params) as a Soroban Bytes ScVal. */
+export function bytesToScVal(value: Uint8Array | Buffer): xdr.ScVal {
+  return nativeToScVal(value, { type: "bytes" });
+}
+
 /**
  * Encode a unit #[contracttype] enum variant as an ScVec([ScSymbol("Variant")]).
  */
