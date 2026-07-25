@@ -23,6 +23,10 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let borrower = Address::generate(&env);
 
     client.initialize(&admin);
+    // Multisig-gated functions are exercised for real in `multisig_admin`'s
+    // integration tests; here `admin` stands in as its own "multisig" so the
+    // rest of this suite can focus on loan-lifecycle behaviour.
+    client.set_multisig_admin(&admin, &admin);
 
     let collateral_asset = Address::generate(&env);
     client.whitelist_asset(&admin, &collateral_asset);
@@ -451,6 +455,7 @@ fn setup_flash(pool_liquidity: i128) -> (Env, Address, Address, token::Client<'s
     let client_addr = contract_id.clone();
     let client = LendingContractClient::new(&env, &contract_id);
     client.initialize(&admin);
+    client.set_multisig_admin(&admin, &admin);
 
     let sac = env.register_stellar_asset_contract_v2(admin.clone());
     let token_id = sac.address();

@@ -8,7 +8,14 @@
  *   1. lending.mark_defaulted(admin, loanId)         — flips the on-chain loan to Defaulted
  *   2. default.record_default(admin, loanId, …)      — records the default phase
  * and, once a loan reaches the insurance threshold (Reported phase):
- *   3. default.trigger_insurance_payout(admin, loanId, lender, amount)
+ *   3. multisig.propose(admin, TriggerInsurancePayout(default, loanId, lender, amount))
+ *
+ * Step 3 does NOT move funds directly — `trigger_insurance_payout` is
+ * multisig-gated (issue #73), since paying out the insurance fund is exactly
+ * the kind of rare, high-impact operation that needs N-of-M human approval.
+ * The automation's own key must be a REGISTERED SIGNER on the MultiSigAdmin
+ * contract so it can propose; a human still has to approve + execute before
+ * any funds actually move. See `contracts/MULTISIG_ADMIN.md`.
  *
  * Every step is idempotent (guarded by Supabase state) and individually
  * error-handled so one bad loan never aborts the whole run.
@@ -21,6 +28,7 @@ import {
   getLedgerTimeSecs,
   i128,
   invokeSigned,
+  tupleEnumToScVal,
   u32,
   u64,
   xlmToStroops,
@@ -37,6 +45,7 @@ const INSURANCE_PAYOUT_DAYS = Number(process.env.DEFAULT_INSURANCE_PAYOUT_DAYS ?
 const LENDING_ID = process.env.NEXT_PUBLIC_LENDING_CONTRACT_ID;
 const DEFAULT_ID = process.env.NEXT_PUBLIC_DEFAULT_CONTRACT_ID;
 const ADMIN_ADDRESS = process.env.NEXT_PUBLIC_ADMIN_ADDRESS;
+const MULTISIG_ADMIN_ID = process.env.NEXT_PUBLIC_MULTISIG_ADMIN_CONTRACT_ID;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,7 +73,7 @@ export interface DefaultRunResult {
   ledgerTime: string;
   scanned: number;
   defaulted: number;
-  paidOut: number;
+  payoutsProposed: number;
   failed: number;
   outcomes: LoanOutcome[];
 }
@@ -203,7 +212,7 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
     ledgerTime: ledgerIso,
     scanned: loans.length,
     defaulted: 0,
-    paidOut: 0,
+    payoutsProposed: 0,
     failed: 0,
     outcomes: [],
   };
@@ -230,7 +239,7 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
 
       const meta = loan.metadata ?? {};
       const alreadyDefaulted = Boolean(loan.defaulted_at) || Boolean(meta.defaulted_onchain_at);
-      const alreadyPaid = Boolean(meta.insurance_paid_at);
+      const alreadyProposedPayout = Boolean(meta.insurance_payout_proposed_at);
 
       const { lenderAddress, onchainLoanId } = await getFundingInfo(supabase, loan.id, meta);
       outcome.onchainLoanId = onchainLoanId;
@@ -261,21 +270,36 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
         result.defaulted++;
       }
 
-      // ── 3: insurance payout once past the insurance threshold ────────────────
-      if (daysOverdue >= INSURANCE_PAYOUT_DAYS && !alreadyPaid) {
-        if (onchainReady && onchainLoanId && lenderAddress) {
-          await triggerPayoutOnChain(signer!, onchainLoanId, lenderAddress, amountStroops);
-          outcome.actions.push("trigger_insurance_payout");
+      // ── 3: propose an insurance payout once past the insurance threshold ─────
+      // Multisig-gated (issue #73) — this only PROPOSES the payout; a human
+      // must still approve + execute on the MultiSigAdmin contract before any
+      // funds move. See the module doc comment above.
+      if (daysOverdue >= INSURANCE_PAYOUT_DAYS && !alreadyProposedPayout) {
+        if (onchainReady && MULTISIG_ADMIN_ID && onchainLoanId && lenderAddress) {
+          const proposalId = await proposeInsurancePayout(
+            signer!,
+            onchainLoanId,
+            lenderAddress,
+            amountStroops
+          );
+          outcome.actions.push("propose:trigger_insurance_payout");
           await setLoanMetadataFlag(supabase, loan.id, {
-            insurance_paid_at: ledgerIso,
+            insurance_payout_proposed_at: ledgerIso,
+            insurance_payout_proposal_id: proposalId,
             insurance_amount_stroops: amountStroops.toString(),
             insurance_lender: lenderAddress,
           });
-          outcome.actions.push("db:insurance_paid");
-          result.paidOut++;
+          outcome.actions.push("db:insurance_payout_proposed");
+          result.payoutsProposed++;
         } else {
           outcome.actions.push(
-            `payout deferred (${onchainReady ? "missing lender/onchain id" : "on-chain not configured"})`
+            `payout proposal deferred (${
+              onchainReady
+                ? MULTISIG_ADMIN_ID
+                  ? "missing lender/onchain id"
+                  : "NEXT_PUBLIC_MULTISIG_ADMIN_CONTRACT_ID not configured"
+                : "on-chain not configured"
+            })`
           );
         }
       }
@@ -324,16 +348,30 @@ async function markDefaultedOnChain(
   });
 }
 
-async function triggerPayoutOnChain(
+/**
+ * Propose (NOT execute) an insurance payout on the MultiSigAdmin contract.
+ * `trigger_insurance_payout` only accepts calls from the registered multisig
+ * — this automation's key must itself be one of that multisig's signers, so
+ * proposing here counts as its own first approval. A human still has to
+ * gather the remaining approvals and call `execute` before funds move.
+ */
+async function proposeInsurancePayout(
   signer: Keypair,
   onchainLoanId: number,
   lenderWallet: string,
   amountStroops: bigint
-): Promise<void> {
-  await invokeSigned({
-    contractId: DEFAULT_ID!,
-    method: "trigger_insurance_payout",
-    args: [addr(ADMIN_ADDRESS!), u32(onchainLoanId), addr(lenderWallet), i128(amountStroops)],
+): Promise<number> {
+  const action = tupleEnumToScVal("TriggerInsurancePayout", [
+    addr(DEFAULT_ID!),
+    u32(onchainLoanId),
+    addr(lenderWallet),
+    i128(amountStroops),
+  ]);
+  const result = await invokeSigned({
+    contractId: MULTISIG_ADMIN_ID!,
+    method: "propose",
+    args: [addr(ADMIN_ADDRESS!), action],
     signer,
   });
+  return Number(result.returnValue);
 }

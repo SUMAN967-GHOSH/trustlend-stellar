@@ -256,6 +256,41 @@ export const LOAN_STATUS_LABEL: Record<LoanStatus, string> = {
   Cancelled: "Cancelled",
 };
 
+// ── Multi-Sig Admin ────────────────────────────────────────────────────────────
+
+export type MultiSigProposalStatus = "Active" | "Executed" | "Cancelled";
+
+/**
+ * Mirrors the Rust `AdminAction` tuple-variant enum. Decoded shape from
+ * `scValToNative` is `{ VariantName: [field0, field1, ...] }`.
+ */
+export type MultiSigAdminAction =
+  | { WhitelistAsset: [string, string] } // [target, asset]
+  | { SetFlashLoanFeeBps: [string, number] } // [target, newFeeBps]
+  | { SetGovernance: [string, string] } // [target, governance]
+  | { SetOracle: [string, string] } // [target, oracle]
+  | { AddToInsurance: [string, bigint] } // [target, amount]
+  | { TriggerInsurancePayout: [string, number, string, bigint] } // [target, loanId, lender, amount]
+  | { AddSigner: [string] } // [newSigner]
+  | { RemoveSigner: [string] } // [signer]
+  | { SetThreshold: [number] }; // [newThreshold]
+
+export interface MultiSigProposal {
+  id: number;
+  proposer: string;
+  action: MultiSigAdminAction;
+  /** Distinct signer addresses who have approved, in approval order. */
+  approvals: string[];
+  createdAt: bigint;
+  status: MultiSigProposalStatus;
+}
+
+export const MULTISIG_PROPOSAL_STATUS_LABEL: Record<MultiSigProposalStatus, string> = {
+  Active: "Awaiting Approvals",
+  Executed: "Executed",
+  Cancelled: "Cancelled",
+};
+
 /** Human-readable label for default phase. */
 export const DEFAULT_PHASE_LABEL: Record<DefaultPhase, string> = {
   Friendly: "Friendly Reminder (Days 1-7)",

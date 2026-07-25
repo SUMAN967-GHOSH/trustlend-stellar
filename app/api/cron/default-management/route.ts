@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     console.log(
       `[default-management] Run complete in ${duration}ms: ` +
         `scanned=${result.scanned} defaulted=${result.defaulted} ` +
-        `paidOut=${result.paidOut} failed=${result.failed}`
+        `payoutsProposed=${result.payoutsProposed} failed=${result.failed}`
     );
     return NextResponse.json({ ok: true, ...result, duration });
   } catch (err) {

@@ -13,6 +13,7 @@ vi.mock("@/lib/stellar/server-contract", () => ({
   u32: (n: number) => ({ u32: n }),
   u64: (n: number) => ({ u64: n }),
   i128: (n: bigint) => ({ i128: n }),
+  tupleEnumToScVal: (variant: string, fields: unknown[]) => ({ variant, fields }),
   xlmToStroops: (xlm: number) => BigInt(Math.round(xlm * 10_000_000)),
 }));
 
@@ -101,7 +102,7 @@ describe("runDefaultManagement", () => {
     const res = await runDefaultManagement();
     expect(res.scanned).toBe(1);
     expect(res.defaulted).toBe(0);
-    expect(res.paidOut).toBe(0);
+    expect(res.payoutsProposed).toBe(0);
     expect(res.outcomes[0].skipped).toContain("grace period");
   });
 
@@ -117,7 +118,7 @@ describe("runDefaultManagement", () => {
     );
     const res = await runDefaultManagement();
     expect(res.defaulted).toBe(1);
-    expect(res.paidOut).toBe(0);
+    expect(res.payoutsProposed).toBe(0);
     expect(res.failed).toBe(0);
     expect(res.outcomes[0].actions).toContain("db:status=defaulted");
   });
@@ -132,13 +133,13 @@ describe("runDefaultManagement", () => {
     );
     const res = await runDefaultManagement();
     expect(res.defaulted).toBe(0);
-    expect(res.paidOut).toBe(0);
+    expect(res.payoutsProposed).toBe(0);
   });
 
   it("reports counts and never throws on a clean run", async () => {
     makeSupabase([], []);
     const res = await runDefaultManagement();
-    expect(res).toMatchObject({ scanned: 0, defaulted: 0, paidOut: 0, failed: 0 });
+    expect(res).toMatchObject({ scanned: 0, defaulted: 0, payoutsProposed: 0, failed: 0 });
     expect(res.ledgerTime).toBe(new Date(NOW * 1000).toISOString());
   });
 });
