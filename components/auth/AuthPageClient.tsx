@@ -12,6 +12,7 @@ import {
   normalizeUserRole,
   type UserRole,
 } from "@/lib/auth/roles";
+import { StellarSignInButton } from "@/components/auth/StellarSignInButton";
 
 type AuthSelectableRole = "borrower" | "lender";
 
@@ -579,6 +580,11 @@ export function AuthPageClient() {
               )}
               Continue with Google
             </button>
+          )}
+
+          {/* Sign in with Stellar (SIWS / SEP-0010) — Web3-native auth */}
+          {(authStep === "sign-in" || authStep === "sign-up") && (
+            <StellarSignInButton className="auth-page-google-btn" disabled={isLoading} />
           )}
 
           {(authStep === "sign-in" || authStep === "sign-up") && (
