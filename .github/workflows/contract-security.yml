@@ -36,8 +36,21 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Run Cargo Audit
-        uses: rustsec/audit-check@v1.4.1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: contracts
+          workspaces: contracts
+
+      # rustsec/audit-check@v1.4.1 dropped its `path` input (it now only accepts
+      # `token`/`ignore`) and always operates on the repo root, but our
+      # Cargo.toml lives in ./contracts — so we run cargo-audit directly instead
+      # of via that action, giving us a real, schema-valid working-directory.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run Cargo Audit
+        working-directory: ./contracts
+        run: cargo audit
