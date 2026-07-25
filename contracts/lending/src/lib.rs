@@ -1,4 +1,9 @@
 #![no_std]
+// `create_loan_request` legitimately needs 8 parameters (loan terms + reputation
+// limits + collateral); clippy's macro backtrace attributes this lint to the
+// `#[contractimpl]` expansion itself rather than a precise span, so a crate-level
+// allow is required to suppress every attribution of the same underlying lint.
+#![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Bytes,
     Env, Vec,

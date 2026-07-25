@@ -114,6 +114,38 @@ export async function invokeSigned(params: {
 }
 
 /**
+ * Read-only contract call via simulation — no signing, no submission, no
+ * on-chain state change. `sourceAddress` just needs to be a funded account
+ * (e.g. the admin address); it isn't authorising anything for a pure read.
+ */
+export async function invokeReadOnly(params: {
+  contractId: string;
+  method: string;
+  args: xdr.ScVal[];
+  sourceAddress: string;
+}): Promise<unknown> {
+  const server = new rpc.Server(SOROBAN_RPC_URL, {
+    allowHttp: SOROBAN_RPC_URL.startsWith("http://"),
+  });
+  const account = await server.getAccount(params.sourceAddress);
+  const contract = new Contract(params.contractId);
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(params.method, ...params.args))
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(`Simulation failed for ${params.method}: ${sim.error}`);
+  }
+  return sim.result?.retval ? scValToNative(sim.result.retval) : null;
+}
+
+/**
  * Fetch the latest ledger close time (unix seconds) from Horizon. Used to
  * evaluate overdue windows against on-chain ledger time rather than wall-clock.
  * Falls back to the current system time on any failure.
