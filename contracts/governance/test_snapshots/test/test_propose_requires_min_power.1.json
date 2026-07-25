@@ -180,6 +180,21 @@
                         "val": {
                           "u32": 0
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistedAsset"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": true
+                        }
                       }
                     ]
                   }

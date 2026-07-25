@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatTokenBalance } from "@/lib/utils/formatting";
 import {
   LendingContract,
   ReputationContract,
@@ -10,11 +10,13 @@ import {
 
 interface LoanApplicationFormProps {
   maxAmount: number;
-  onSubmit: (amount: number, duration: number) => Promise<void>;
+  onSubmit: (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => Promise<void>;
 }
 export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationFormProps) {
   const [amount, setAmount] = useState("");
   const [duration, setDuration] = useState("60");
+  const [collateralAsset, setCollateralAsset] = useState("");
+  const [collateralAmount, setCollateralAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,13 +27,24 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
 
     try {
       const amountNum = parseFloat(amount);
+      const collateralAmountNum = parseFloat(collateralAmount);
       if (!amountNum || amountNum <= 0 || amountNum > maxAmount) {
         setError(`Amount must be between 1 and ${maxAmount}`);
         return;
       }
-      await onSubmit(amountNum, parseInt(duration));
+      if (!collateralAsset) {
+        setError("Please select a collateral asset");
+        return;
+      }
+      if (!collateralAmountNum || collateralAmountNum <= 0) {
+        setError("Collateral amount must be positive");
+        return;
+      }
+      await onSubmit(amountNum, parseInt(duration), collateralAsset, collateralAmountNum);
       setAmount("");
       setDuration("60");
+      setCollateralAsset("");
+      setCollateralAmount("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit application");
     } finally {
@@ -70,6 +83,32 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
           <option value="60">60 days (12% interest)</option>
           <option value="90">90 days (10% interest)</option>
         </select>
+      </div>
+
+      <div>
+        <label className="workspace-label">Collateral Asset Address</label>
+        <input
+          type="text"
+          value={collateralAsset}
+          onChange={(e) => setCollateralAsset(e.target.value)}
+          placeholder="Enter collateral asset address"
+          className="workspace-input"
+          disabled={loading}
+        />
+      </div>
+
+      <div>
+        <label className="workspace-label">Collateral Amount</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={collateralAmount}
+          onChange={(e) => setCollateralAmount(e.target.value)}
+          placeholder="Enter collateral amount"
+          className="workspace-input"
+          disabled={loading}
+        />
       </div>
 
       {error && <p className="workspace-error">{error}</p>}
@@ -225,13 +264,13 @@ export function BorrowerForms({
   const [, setSorobanLoading] = useState(false);
   const pendingLoans = loans.filter((loan) => String(loan.status) === "requested");
 
-  const handleLoanApplication = async (amount: number, duration: number) => {
+  const handleLoanApplication = async (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => {
     setSorobanLoading(true);
     try {
       const response = await fetch("/api/loans/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default" }),
+        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default", collateral_asset: collateralAsset, collateral_amount: collateralAmount }),
       });
 
       if (!response.ok) {
@@ -258,13 +297,16 @@ export function BorrowerForms({
           ]);
 
           const amountStroops = xlmToStroops(amount);
+          const collateralAmountStroops = xlmToStroops(collateralAmount); // assuming same decimals as XLM for now
 
           await LendingContract.createLoanRequest(
             walletAddress,
             amountStroops,
             duration,
             onChainRate,
-            onChainMax
+            onChainMax,
+            collateralAsset,
+            collateralAmountStroops
           );
 
           console.log("[TrustLend] Soroban loan request recorded.");
@@ -346,7 +388,7 @@ export function BorrowerForms({
                   </p>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatCurrency(Number(loan.principal_amount ?? 0))}</p>
+                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatTokenBalance(Number(loan.principal_amount ?? 0))}</p>
                   <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
                 </div>
               </div>
@@ -369,7 +411,7 @@ export function BorrowerForms({
         ) : (
           <>
             <p className="workspace-card-copy">Loan #{String(selectedRepaymentLoan.id).slice(0, 8)}</p>
-            <p className="workspace-card-copy">Still owe: {formatCurrency(dueAmount)}</p>
+            <p className="workspace-card-copy">Still owe: {formatTokenBalance(dueAmount)}</p>
             <p className="workspace-card-copy">
               Next due: {selectedRepaymentLoan.due_at ? new Date(String(selectedRepaymentLoan.due_at)).toLocaleDateString() : "-"}
             </p>
