@@ -27,6 +27,31 @@ if (!CONTRACT_ID) {
   );
 }
 
+/** Address of the linked MultiSigAdmin contract (issue #73). */
+export async function getMultisigAdmin(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_multisig_admin",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
+/**
+ * One-time admin bootstrap: link the MultiSigAdmin contract. After this,
+ * `addToInsurance` / `triggerInsurancePayout` can only be called by that
+ * multisig — the plain admin key loses direct access permanently.
+ */
+export async function setMultisigAdmin(adminAddress: string, multisigAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_multisig_admin",
+    args: [addressToScVal(adminAddress), addressToScVal(multisigAddress)],
+    callerAddress: adminAddress,
+  });
+}
+
 // ─── Read functions ───────────────────────────────────────────────────────────
 
 export async function getDefaultRecord(

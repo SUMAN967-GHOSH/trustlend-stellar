@@ -219,6 +219,25 @@ impl DefaultManagementContract {
             .expect("Contract not initialised")
     }
 
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    /// Once set, `add_to_insurance` / `trigger_insurance_payout` — moving the
+    /// insurance fund's balance — can ONLY be called by this address.
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
     // ── Default management ────────────────────────────────────────────────────
 
     /// Called by admin/backend (daily cron) after checking Horizon for overdue
@@ -273,10 +292,12 @@ impl DefaultManagementContract {
             .unwrap_or(0)
     }
 
-    /// Increase the insurance fund (from platform fee income).
+    /// Increase the insurance fund (from platform fee income). Multisig-gated
+    /// — "handling protocol fees" is exactly the kind of rare, high-impact
+    /// fund movement this contract protects with N-of-M approval.
     pub fn add_to_insurance(env: Env, caller: Address, amount: i128) {
         caller.require_auth();
-        Self::assert_admin(&env, &caller);
+        Self::assert_multisig_admin(&env, &caller);
 
         let current = Self::get_insurance_balance(env.clone());
         env.storage()
@@ -284,9 +305,10 @@ impl DefaultManagementContract {
             .set(&DataKey::InsuranceBalance, &(current + amount));
     }
 
-    /// Trigger an insurance payout to a lender for a defaulted loan.
-    /// Actual XLM moves via a PAYMENT operation by the admin wallet; this
-    /// function records the event and deducts from the fund balance.
+    /// Trigger an insurance payout ("withdrawing protocol fees") to a lender
+    /// for a defaulted loan. Multisig-gated. Actual XLM moves via a PAYMENT
+    /// operation by the admin wallet; this function records the event and
+    /// deducts from the fund balance.
     pub fn trigger_insurance_payout(
         env: Env,
         caller: Address,

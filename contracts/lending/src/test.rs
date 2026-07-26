@@ -1,6 +1,8 @@
 #![cfg(test)]
 #![allow(clippy::inconsistent_digit_grouping)]
 
+extern crate std;
+
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
@@ -20,6 +22,10 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let borrower = Address::generate(&env);
 
     client.initialize(&admin);
+    // Multisig-gated functions are exercised for real in `multisig_admin`'s
+    // integration tests; here `admin` stands in as its own "multisig" so the
+    // rest of this suite can focus on loan-lifecycle behaviour.
+    client.set_multisig_admin(&admin, &admin);
 
     let collateral_asset = Address::generate(&env);
     client.whitelist_asset(&admin, &collateral_asset);

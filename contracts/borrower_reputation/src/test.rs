@@ -145,6 +145,10 @@ fn setup_with_oracle() -> (Env, Address, Address, Address, Address) {
     let borrower = Address::generate(&env);
 
     client.initialize(&admin);
+    // `set_oracle` is multisig-gated (see the `multisig_admin` crate); `admin`
+    // stands in as its own "multisig" here since this suite is testing oracle
+    // ingestion, not the multisig approval flow itself.
+    client.set_multisig_admin(&admin, &admin);
     client.set_oracle(&admin, &oracle);
     client.init_borrower(&borrower);
 

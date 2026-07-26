@@ -5,6 +5,7 @@ members = [
     "lending",
     "default_management",
     "governance",
+    "multisig_admin",
 ]
 resolver = "2"
 

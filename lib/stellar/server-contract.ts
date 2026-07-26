@@ -41,6 +41,15 @@ const STROOPS_PER_XLM = 10_000_000n;
 export const xlmToStroops = (xlm: number): bigint =>
   BigInt(Math.round(xlm * Number(STROOPS_PER_XLM)));
 
+/**
+ * Encode a tuple-variant `#[contracttype]` enum (e.g. `MultiSigAdmin::AdminAction`)
+ * as `ScVec([ScSymbol(variant), field0, field1, ...])`. Unit variants use
+ * `enumToScVal` in `lib/stellar/soroban.ts`; this is the tuple-field equivalent.
+ */
+export function tupleEnumToScVal(variant: string, fields: xdr.ScVal[]): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant), ...fields]);
+}
+
 // ─── Signer ───────────────────────────────────────────────────────────────────
 
 /** Load the admin signer from ADMIN_SECRET_KEY, or null if unconfigured. */
@@ -111,6 +120,38 @@ export async function invokeSigned(params: {
     // NOT_FOUND → keep polling
   }
   throw new Error(`Transaction ${sent.hash} for ${method} timed out after 30s`);
+}
+
+/**
+ * Read-only contract call via simulation — no signing, no submission, no
+ * on-chain state change. `sourceAddress` just needs to be a funded account
+ * (e.g. the admin address); it isn't authorising anything for a pure read.
+ */
+export async function invokeReadOnly(params: {
+  contractId: string;
+  method: string;
+  args: xdr.ScVal[];
+  sourceAddress: string;
+}): Promise<unknown> {
+  const server = new rpc.Server(SOROBAN_RPC_URL, {
+    allowHttp: SOROBAN_RPC_URL.startsWith("http://"),
+  });
+  const account = await server.getAccount(params.sourceAddress);
+  const contract = new Contract(params.contractId);
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(params.method, ...params.args))
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(`Simulation failed for ${params.method}: ${sim.error}`);
+  }
+  return sim.result?.retval ? scValToNative(sim.result.retval) : null;
 }
 
 /**
