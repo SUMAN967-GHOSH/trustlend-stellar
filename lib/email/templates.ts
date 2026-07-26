@@ -1,5 +1,17 @@
 const brandName = "TrustLend";
 
+function stripHtmlTags(input: string) {
+  let sanitized = input;
+  let previous: string;
+
+  do {
+    previous = sanitized;
+    sanitized = sanitized.replace(/<[^>]+>/g, "");
+  } while (sanitized !== previous);
+
+  return sanitized;
+}
+
 function baseEmail({
   title,
   preview,
@@ -20,7 +32,7 @@ function baseEmail({
 
   return {
     subject: title,
-    text: `${preview}\n\n${body.replace(/<[^>]+>/g, "")}${actionUrl ? `\n\n${actionUrl}` : ""}`,
+    text: `${preview}\n\n${stripHtmlTags(body)}${actionUrl ? `\n\n${actionUrl}` : ""}`,
     html: `<!doctype html>
 <html>
   <body style="margin:0;background:#f6f7fb;font-family:Arial,sans-serif;color:#151827">
