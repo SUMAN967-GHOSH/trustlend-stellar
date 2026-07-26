@@ -11,6 +11,7 @@ import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } 
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
+import { HealthFactorGauge } from "@/components/dashboard/HealthFactorGauge";
 import {
   getIndexedBorrowerReadModel,
   isIndexerConfigured,
@@ -146,6 +147,21 @@ export default async function BorrowerDashboardPage() {
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
 
+  // ── Health Factor computation ──────────────────────────────────────────
+  // Outstanding debt across all active loans (in XLM, converted to an approximate USD value).
+  // Uses a conservative placeholder XLM price; in production this would come from the oracle.
+  const XLM_PRICE_USD = 0.10;
+  const totalDebtXlm = activeLoans.reduce(
+    (sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)),
+    0,
+  ) / 10_000_000;
+  const totalDebtUsd = totalDebtXlm * XLM_PRICE_USD;
+  // Collateral value — approximated as 150% of outstanding debt when active loans exist
+  // (the Soroban lending contract requires over-collateralization at loan creation).
+  // A real implementation would read collateral amounts from on-chain loan records.
+  const totalCollateralUsd = activeLoans.length > 0 ? totalDebtUsd * 1.5 : 0;
+  const showHealthFactor = activeLoans.length > 0 && totalDebtUsd > 0;
+
   const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
     if (s === "requested")                    return "yellow";
     if (s === "approved")                     return "blue";
@@ -250,6 +266,16 @@ export default async function BorrowerDashboardPage() {
             </a>
           )}
         </div>
+
+        {/* ── Health Factor Gauge ── */}
+        {showHealthFactor && (
+          <HealthFactorGauge
+            collateralValueUsd={totalCollateralUsd}
+            debtValueUsd={totalDebtUsd}
+            collateralAssetSymbol="USD"
+            debtAssetSymbol="XLM"
+          />
+        )}
 
         {/* ── Loan Cards ── */}
         {normalizedLoans.length > 0 && (
