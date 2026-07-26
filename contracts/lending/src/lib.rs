@@ -19,6 +19,17 @@ pub enum LoanStatus {
 /// A single loan record.
 #[contracttype]
 #[derive(Clone)]
+pub struct LoanRequestInput {
+    pub amount: i128,
+    pub duration_days: u32,
+    pub interest_rate_bps: u32,
+    pub max_loan_amount: i128,
+    pub collateral_asset: Address,
+    pub collateral_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub struct LoanRecord {
     pub id: u32,
     pub borrower: Address,
@@ -186,14 +197,18 @@ impl LendingContract {
     pub fn create_loan_request(
         env: Env,
         borrower: Address,
-        amount: i128,
-        duration_days: u32,
-        interest_rate_bps: u32,
-        max_loan_amount: i128,
-        collateral_asset: Address,
-        collateral_amount: i128,
+        request: LoanRequestInput,
     ) -> u32 {
         borrower.require_auth();
+
+        let LoanRequestInput {
+            amount,
+            duration_days,
+            interest_rate_bps,
+            max_loan_amount,
+            collateral_asset,
+            collateral_amount,
+        } = request;
 
         if amount <= 0 {
             panic!("Loan amount must be positive");
