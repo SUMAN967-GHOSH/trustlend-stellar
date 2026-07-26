@@ -288,3 +288,176 @@ fn test_oracle_boost_stacks_on_tier_limit() {
     );
     assert_eq!(client.calculate_max_loan(&borrower), 200_000_000_000);
 }
+
+// ─── Pausable / Multi-sig tests ──────────────────────────────────────────────
+
+fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BorrowerReputationContract, ());
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let signer1 = Address::generate(&env);
+
+    client.initialize(&admin);
+    client.init_borrower(&borrower);
+
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
+    client.setup_multisig(&admin, &admins, &2);
+
+    (env, contract_id, admin, borrower, signer1)
+}
+
+#[test]
+fn test_rep_setup_multisig() {
+    let (env, contract_id, admin, _borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    let admins = client.get_multisig_admins();
+    assert_eq!(admins.len(), 2);
+    assert!(admins.iter().any(|a| a == admin));
+    assert!(admins.iter().any(|a| a == signer1));
+    assert_eq!(client.get_multisig_threshold(), 2);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn test_rep_pause_activates_with_threshold() {
+    let (env, contract_id, admin, _borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    assert!(!client.is_paused());
+
+    client.pause(&admin);
+    assert!(!client.is_paused());
+
+    client.pause(&signer1);
+    assert!(client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_rep_add_reputation_event_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_rep_freeze_account_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    client.freeze_account(&admin, &borrower, &String::from_str(&env, "fraud"));
+}
+
+#[test]
+fn test_rep_unfreeze_allowed_when_paused() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // Freeze first while unpaused
+    client.freeze_account(&admin, &borrower, &String::from_str(&env, "fraud"));
+    assert!(client.is_frozen(&borrower));
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Unfreeze should still work (restoring access)
+    client.unfreeze_account(&admin, &borrower);
+    assert!(!client.is_frozen(&borrower));
+}
+
+#[test]
+fn test_rep_oracle_submission_allowed_when_paused() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // Set oracle while unpaused
+    let oracle = Address::generate(&env);
+    client.set_oracle(&admin, &oracle);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Oracle submission should still work (independent data feed)
+    client.submit_credit_score(
+        &oracle,
+        &borrower,
+        &500,
+        &2,
+        &String::from_str(&env, "utility"),
+    );
+
+    let data = client.get_oracle_data(&borrower);
+    assert_eq!(data.credit_score, 500);
+}
+
+#[test]
+fn test_rep_unpause_restores_operations() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Reputation events should work again
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, 50);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_rep_non_admin_cannot_pause() {
+    let (env, contract_id, _admin, _borrower, _signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    client.pause(&random);
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised pause")]
+fn test_rep_duplicate_pause_signer_rejected() {
+    let (env, contract_id, admin, _borrower, _signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    client.pause(&admin);
+    client.pause(&admin); // duplicate
+}
+
+#[test]
+fn test_rep_multiple_signers_independently() {
+    let (env, contract_id, admin, _borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // Pause with admin first
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 1);
+
+    // Then signer1
+    client.pause(&signer1);
+    assert!(client.is_paused());
+}

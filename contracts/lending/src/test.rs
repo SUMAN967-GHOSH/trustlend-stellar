@@ -3,7 +3,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Events, Ledger},
     Address, Env,
 };
 
@@ -325,4 +325,288 @@ fn test_liquidation_threshold_extreme_inputs_no_overflow() {
     // Verify u32::MAX handles safely and clamps to bounds
     let threshold = client.calculate_liquidation_threshold(&u32::MAX, &u32::MAX);
     assert!((5000..=9000).contains(&threshold));
+}
+
+// ─── Pausable / Multi-sig tests ──────────────────────────────────────────────
+
+fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LendingContract, ());
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let signer1 = Address::generate(&env);
+    let signer2 = Address::generate(&env);
+
+    client.initialize(&admin);
+    let collateral_asset = Address::generate(&env);
+    client.whitelist_asset(&admin, &collateral_asset);
+
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone(), signer2.clone()];
+    client.setup_multisig(&admin, &admins, &2);
+
+    (env, contract_id, admin, borrower, collateral_asset, signer1, signer2)
+}
+
+#[test]
+fn test_setup_multisig() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admins = client.get_multisig_admins();
+    assert_eq!(admins.len(), 3);
+    assert!(admins.iter().any(|a| a == admin));
+    assert!(admins.iter().any(|a| a == signer1));
+    assert!(admins.iter().any(|a| a == signer2));
+    assert_eq!(client.get_multisig_threshold(), 2);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Threshold must be at least 1")]
+fn test_setup_multisig_zero_threshold_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1, signer2];
+    client.setup_multisig(&admin, &admins, &0);
+}
+
+#[test]
+#[should_panic(expected = "Threshold exceeds number of admins")]
+fn test_setup_multisig_threshold_too_high_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admins = soroban_sdk::vec![&env, signer1, signer2];
+    client.setup_multisig(&admin, &admins, &5);
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised pause")]
+fn test_duplicate_pause_signer_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Admin calls pause twice
+    client.pause(&admin);
+    client.pause(&admin);
+}
+
+#[test]
+fn test_pause_activates_with_threshold() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 0);
+
+    // First signer (below threshold)
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 1);
+
+    // Second signer reaches threshold (2) -> paused
+    client.pause(&signer1);
+    assert!(client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 0); // reset after activation
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_create_loan_request_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause with 2 signers
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_approve_loan_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Create a loan while unpaused
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_mark_defaulted_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Create + approve + activate a loan while unpaused
+    let lender = Address::generate(&env);
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Try to mark defaulted
+    client.mark_defaulted(&admin, &loan_id);
+}
+
+#[test]
+fn test_record_payment_allowed_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let lender = Address::generate(&env);
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Repayments should still work
+    let status = client.record_payment(&admin, &loan_id, &500_0000000);
+    assert_eq!(status, LoanStatus::Active);
+}
+
+#[test]
+#[should_panic(expected = "Contract is not paused")]
+fn test_unpause_when_not_paused_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.unpause(&admin);
+}
+
+#[test]
+fn test_unpause_deactivates_with_threshold() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause first
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause with 2 signers
+    client.unpause(&admin);
+    assert!(client.is_paused()); // still paused (1 < threshold 2)
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised unpause")]
+fn test_duplicate_unpause_signer_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause first
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Try to unpause with same signer twice
+    client.unpause(&admin);
+    client.unpause(&admin);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_non_admin_cannot_pause() {
+    let (env, contract_id, _admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    client.pause(&random);
+}
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_pause_without_multisig_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LendingContract, ());
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // No setup_multisig called
+    client.pause(&admin);
+}
+
+#[test]
+fn test_resume_operations_after_unpause() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause
+    client.unpause(&admin);
+    client.unpause(&signer2);
+    assert!(!client.is_paused());
+
+    // Create a loan again — should work
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    assert_eq!(loan_id, 1);
+}
+
+#[test]
+fn test_multisig_admin_can_still_use_admin_functions_when_paused() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Admin should still be able to whitelist assets
+    let new_asset = Address::generate(&env);
+    client.whitelist_asset(&admin, &new_asset);
+    assert!(client.is_asset_whitelisted(&new_asset));
+}
+
+#[test]
+fn test_pause_unpause_events_emitted() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // One "paused" event is emitted when the threshold is met
+    let events = env.events().all();
+    assert!(!events.is_empty());
 }

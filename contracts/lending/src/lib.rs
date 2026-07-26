@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,20 @@ pub enum DataKey {
     Governance,
     /// Whitelisted collateral asset
     WhitelistedAsset(Address),
+    /// List of multisig admin addresses
+    MultisigAdmins,
+    /// Number of admin signatures required to pause/unpause
+    MultisigThreshold,
+    /// Whether the contract is paused
+    IsPaused,
+    /// Whether a given signer has already called pause (dedup)
+    PauseSigner(Address),
+    /// Number of unique signers who have called pause
+    PauseSignerCount,
+    /// Whether a given signer has already called unpause (dedup)
+    UnpauseSigner(Address),
+    /// Number of unique signers who have called unpause
+    UnpauseSignerCount,
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -107,6 +123,147 @@ impl LendingContract {
         // Whitelist XLM as default collateral asset (using dummy address for now)
         // In real implementation, we'd use the native asset identifier
         env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
+    }
+
+    /// Configure multi-sig admin set for pause/unpause.
+    /// The original single admin is automatically included.
+    /// `threshold` must be >= 1 and <= admins.len().
+    pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if threshold > admins.len() {
+            panic!("Threshold exceeds number of admins");
+        }
+
+        // Ensure the single admin is included in the multisig list
+        let mut final_admins = admins;
+        let has_admin = final_admins.iter().any(|a| a == admin);
+        if !has_admin {
+            final_admins.push_back(admin);
+        }
+
+        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+    }
+
+    /// Multi-sig pause: requires `threshold` unique admin signatures.
+    /// Each admin calls this once; the contract tracks unique signers.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is already paused");
+        }
+
+        // Dedup: only count each signer once
+        let signer_key = DataKey::PauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised pause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &true);
+            // Reset signer tracking for next pause cycle
+            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("lending"), symbol_short!("paused")),
+                (),
+            );
+        }
+    }
+
+    /// Multi-sig unpause: requires `threshold` unique admin signatures.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised unpause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &false);
+            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("lending"), symbol_short!("unpaused")),
+                (),
+            );
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn get_multisig_admins(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_multisig_threshold(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigThreshold)
+            .unwrap_or(1)
+    }
+
+    pub fn get_pause_signer_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0)
     }
 
     /// Whitelist a new collateral asset (admin only)
@@ -194,6 +351,7 @@ impl LendingContract {
         collateral_amount: i128,
     ) -> u32 {
         borrower.require_auth();
+        Self::assert_not_paused(&env);
 
         if amount <= 0 {
             panic!("Loan amount must be positive");
@@ -288,6 +446,7 @@ impl LendingContract {
         escrow_id: u32,
     ) {
         lender.require_auth();
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Pending {
@@ -333,6 +492,7 @@ impl LendingContract {
     pub fn activate_loan(env: Env, caller: Address, loan_id: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Approved {
@@ -403,6 +563,7 @@ impl LendingContract {
     pub fn mark_defaulted(env: Env, caller: Address, loan_id: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Active {
@@ -526,6 +687,15 @@ impl LendingContract {
     }
 
     fn assert_admin(env: &Env, caller: &Address) {
+        // Check multisig admins first, then fall back to single admin
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if !multisig_admins.is_empty() && multisig_admins.iter().any(|a| a == *caller) {
+            return;
+        }
         let admin: Address = env
             .storage()
             .instance()
@@ -533,6 +703,31 @@ impl LendingContract {
             .expect("Contract not initialised");
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
+        }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if multisig_admins.is_empty() {
+            panic!("Multisig not configured");
+        }
+        if !multisig_admins.iter().any(|a| a == *caller) {
+            panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    fn assert_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
         }
     }
 }
