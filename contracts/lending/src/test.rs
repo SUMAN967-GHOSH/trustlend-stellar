@@ -52,7 +52,7 @@ fn test_create_loan_request_basic() {
     let days: u32 = 30;
     let max_loan: i128 = 100_000_0000000;
 
-    let loan_id = client.create_loan_request(&borrower, &principal, &days, &rate_bps, &max_loan, &collateral_asset, &100_000_0000000);
+    let loan_id = client.create_loan_request(&borrower, &principal, &days, &rate_bps, &max_loan, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     assert_eq!(loan_id, 1);
 
     let loan = client.get_loan(&loan_id);
@@ -77,7 +77,7 @@ fn test_interest_calculation_is_correct() {
     let expected_interest: i128 = principal * 1500 / 10_000; // = 1 500 XLM
 
     let loan_id =
-        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &(principal * 2), &collateral_asset, &100_000_0000000);
+        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &(principal * 2), &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
 
     let actual_interest = loan.total_due - principal;
@@ -95,7 +95,7 @@ fn test_create_loan_max_duration_365_days() {
     let days: u32 = 365;
     let max_loan: i128 = 1_000_000_0000000;
 
-    let loan_id = client.create_loan_request(&borrower, &principal, &days, &rate_bps, &max_loan, &collateral_asset, &100_000_0000000);
+    let loan_id = client.create_loan_request(&borrower, &principal, &days, &rate_bps, &max_loan, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
     assert_eq!(loan.duration_days, 365);
     assert!(loan.total_due > principal);
@@ -113,7 +113,7 @@ fn test_create_loan_min_duration_1_day() {
         &1,
         &1500,
         &100_000_0000000,
-     &collateral_asset, &100_000_0000000);
+     &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
     assert_eq!(loan.duration_days, 1);
 }
@@ -137,7 +137,7 @@ fn test_no_overflow_at_maximum_valid_inputs() {
     // principal × rate_bps × days = 100_000_0000000 × 1500 × 365 ≈ 5.475 × 10^19
     // i128::MAX ≈ 1.7 × 10^38 — plenty of headroom.
     let loan_id =
-        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &principal, &collateral_asset, &100_000_0000000);
+        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &principal, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
     assert!(loan.total_due > principal);
 }
@@ -157,7 +157,7 @@ fn test_overflow_panics_with_near_max_principal() {
         &365,
         &1500,
         &I128_MAX,
-     &collateral_asset, &100_000_0000000);
+     &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 /// A principal that overflows only at the second multiplication step
@@ -177,7 +177,7 @@ fn test_overflow_panics_at_second_multiplication() {
         &365,
         &1500,
         &I128_MAX,
-     &collateral_asset, &100_000_0000000);
+     &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 // ─── Validation-guard tests ───────────────────────────────────────────────────
@@ -189,7 +189,7 @@ fn test_duration_zero_is_rejected() {
     let (env, contract_id, _admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    client.create_loan_request(&borrower, &1_000_0000000, &0, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000);
+    client.create_loan_request(&borrower, &1_000_0000000, &0, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 /// Duration exceeding 365 days must be rejected.
@@ -199,7 +199,7 @@ fn test_duration_366_is_rejected() {
     let (env, contract_id, _admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    client.create_loan_request(&borrower, &1_000_0000000, &366, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000);
+    client.create_loan_request(&borrower, &1_000_0000000, &366, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 /// Zero-amount loan must be rejected.
@@ -209,7 +209,7 @@ fn test_zero_amount_is_rejected() {
     let (env, contract_id, _admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    client.create_loan_request(&borrower, &0, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000);
+    client.create_loan_request(&borrower, &0, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 /// Amount exceeding the reputation-based limit must be rejected.
@@ -220,7 +220,7 @@ fn test_amount_over_max_is_rejected() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     let max_loan: i128 = 1_000_0000000; // 1 000 XLM
-    client.create_loan_request(&borrower, &(max_loan + 1), &30, &1500, &max_loan, &collateral_asset, &100_000_0000000);
+    client.create_loan_request(&borrower, &(max_loan + 1), &30, &1500, &max_loan, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
 }
 
 // ─── due_at overflow test ─────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ fn test_due_at_computed_correctly() {
 
     let days: u32 = 365;
     let loan_id =
-        client.create_loan_request(&borrower, &1_000_0000000, &days, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000);
+        client.create_loan_request(&borrower, &1_000_0000000, &days, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
 
     let expected_due_at = 1_000_000_000_u64 + (365_u64 * 86_400);
@@ -256,7 +256,7 @@ fn test_platform_fee_is_one_percent_of_interest() {
     let days: u32 = 365;
 
     let loan_id =
-        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &(principal * 2), &collateral_asset, &100_000_0000000);
+        client.create_loan_request(&borrower, &principal, &days, &rate_bps, &(principal * 2), &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed);
     let loan = client.get_loan(&loan_id);
 
     let interest = loan.total_due - principal;
@@ -660,4 +660,193 @@ fn test_flash_loan_fee_capped() {
     let admin = client.get_admin();
 
     client.set_flash_loan_fee_bps(&admin, &501); // > MAX_FLASH_LOAN_FEE_BPS (500)
+}
+
+// ─── Interest rate model tests ────────────────────────────────────────────────
+
+/// Helper: creates and activates a loan, returning its ID.
+fn create_and_activate_loan(
+    env: &Env,
+    client: &LendingContractClient,
+    admin: &Address,
+    borrower: &Address,
+    collateral_asset: &Address,
+    rate_model: &InterestRateModel,
+) -> u32 {
+    let principal: i128 = 1_000_0000000;
+    let rate_bps: u32 = 1000;
+    let days: u32 = 30;
+    let max_loan: i128 = 100_000_0000000;
+
+    let loan_id = client.create_loan_request(
+        borrower, &principal, &days, &rate_bps, &max_loan,
+        collateral_asset, &100_000_0000000, rate_model,
+    );
+
+    // Approve (lender = admin for simplicity)
+    client.approve_loan(admin, &loan_id, &1);
+    // Activate
+    client.activate_loan(admin, &loan_id);
+    loan_id
+}
+
+/// Creating a Fixed-rate loan stores the model correctly.
+#[test]
+fn test_create_loan_with_fixed_rate_model() {
+    let (env, contract_id, _admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1000, &100_000_0000000,
+        &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
+    );
+    let loan = client.get_loan(&loan_id);
+    assert_eq!(loan.rate_model, InterestRateModel::Fixed);
+    assert_eq!(loan.base_rate_bps, 1000);
+}
+
+/// Creating a Floating-rate loan stores the model correctly.
+#[test]
+fn test_create_loan_with_floating_rate_model() {
+    let (env, contract_id, _admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &500, &100_000_0000000,
+        &collateral_asset, &100_000_0000000, &InterestRateModel::Floating,
+    );
+    let loan = client.get_loan(&loan_id);
+    assert_eq!(loan.rate_model, InterestRateModel::Floating);
+    assert_eq!(loan.base_rate_bps, 500);
+}
+
+/// Switching from Fixed to Floating and back works, charges fee, and toggles model.
+#[test]
+fn test_switch_rate_model_fixed_to_floating() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
+    );
+    let loan_before = client.get_loan(&loan_id);
+    assert_eq!(loan_before.rate_model, InterestRateModel::Fixed);
+
+    // Switch Fixed -> Floating
+    client.switch_rate_model(&borrower, &loan_id);
+    let loan_after = client.get_loan(&loan_id);
+    assert_eq!(loan_after.rate_model, InterestRateModel::Floating);
+
+    // Fee was charged: 0.5% of remaining_due
+    let expected_fee = loan_before.remaining_due * 50 / 10_000;
+    assert_eq!(
+        loan_after.remaining_due,
+        loan_before.remaining_due + expected_fee,
+    );
+}
+
+/// Switching is blocked during the 24h cooldown.
+#[test]
+#[should_panic(expected = "Rate switch cooldown not elapsed")]
+fn test_switch_rate_model_cooldown_enforced() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
+    );
+
+    // First switch should succeed
+    client.switch_rate_model(&borrower, &loan_id);
+
+    // Second switch within 24h should fail
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3600); // +1 hour
+    client.switch_rate_model(&borrower, &loan_id);
+}
+
+/// Switching succeeds again after cooldown expires.
+#[test]
+fn test_switch_rate_model_allowed_after_cooldown() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
+    );
+
+    // First switch
+    client.switch_rate_model(&borrower, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    assert_eq!(loan.rate_model, InterestRateModel::Floating);
+
+    // Advance time past cooldown
+    env.ledger().set_timestamp(env.ledger().timestamp() + 86_401);
+
+    // Second switch should succeed
+    client.switch_rate_model(&borrower, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    assert_eq!(loan.rate_model, InterestRateModel::Fixed);
+}
+
+/// Only the borrower can switch the rate model.
+#[test]
+#[should_panic(expected = "Caller is not the borrower")]
+fn test_switch_rate_model_only_borrower() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
+    );
+
+    let attacker = Address::generate(&env);
+    client.switch_rate_model(&attacker, &loan_id);
+}
+
+/// Can only switch rate model on ACTIVE loans.
+#[test]
+#[should_panic(expected = "Can only switch rate model on ACTIVE loans")]
+fn test_switch_rate_model_only_active() {
+    let (env, contract_id, _admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Create but don't activate
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1000, &100_000_0000000,
+        &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
+    );
+    client.switch_rate_model(&borrower, &loan_id);
+}
+
+/// Admin can update the floating rate and remaining totals are recalculated.
+#[test]
+fn test_update_floating_rate() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Floating,
+    );
+    let loan_before = client.get_loan(&loan_id);
+    assert_eq!(loan_before.interest_rate_bps, 1000);
+
+    // Update to a higher rate
+    client.update_floating_rate(&admin, &loan_id, &2000);
+    let loan_after = client.get_loan(&loan_id);
+    assert_eq!(loan_after.interest_rate_bps, 2000);
+    // With a higher rate, total_due should be different from original
+    // (exact value depends on remaining days)
+}
+
+/// update_floating_rate panics on a Fixed-rate loan.
+#[test]
+#[should_panic(expected = "Loan is not using floating rate model")]
+fn test_update_floating_rate_rejects_fixed() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = create_and_activate_loan(
+        &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
+    );
+    client.update_floating_rate(&admin, &loan_id, &2000);
 }

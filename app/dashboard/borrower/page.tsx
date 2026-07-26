@@ -59,7 +59,7 @@ export default async function BorrowerDashboardPage() {
           .maybeSingle(),
         supabase
           .from("loans")
-          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at, created_at")
+          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at, created_at, metadata")
           .eq("borrower_id", user.id)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -117,7 +117,14 @@ export default async function BorrowerDashboardPage() {
     const status = String(loan.status ?? "requested");
     const hasFundingLedger = fundedLoanIds.has(String(loan.id));
     const effectiveStatus = status === "requested" && hasFundingLedger ? "funded" : status;
-    return { ...loan, effectiveStatus };
+    
+    // Extract rate model from metadata, default to fixed for backward compatibility
+    let rateModel = "fixed";
+    if (loan.metadata && typeof loan.metadata === "object" && "rate_model" in loan.metadata) {
+      rateModel = String(loan.metadata.rate_model);
+    }
+    
+    return { ...loan, effectiveStatus, rateModel };
   });
 
   const kycStatus = String(profile?.kyc_status ?? "pending");
@@ -308,7 +315,16 @@ export default async function BorrowerDashboardPage() {
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
                           </td>
-                        <td style={{ padding: "0.75rem" }}>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</td>
+                        <td style={{ padding: "0.75rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <span>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</span>
+                            <Badge 
+                              variant={loan.rateModel === "floating" ? "blue" : "yellow"}
+                            >
+                              {loan.rateModel === "floating" ? "FLOATING" : "FIXED"}
+                            </Badge>
+                          </div>
+                        </td>
                         <td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
                           {loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "—"}
                         </td>
