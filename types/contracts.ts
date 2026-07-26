@@ -99,6 +99,17 @@ export interface EscrowHold {
   status: EscrowStatus;
 }
 
+// ── Interest Rate Model ───────────────────────────────────────────────────────
+
+/** Whether a loan uses a fixed or floating interest rate. */
+export type InterestRateModel = "Fixed" | "Floating";
+
+/** Fee charged when switching rate models, in bps of remaining debt (0.5%). */
+export const RATE_SWITCH_FEE_BPS = 50;
+
+/** Cooldown between rate model switches in seconds (24 hours). */
+export const RATE_SWITCH_COOLDOWN_SECS = 86_400;
+
 // ── Lending ───────────────────────────────────────────────────────────────────
 
 export type LoanStatus =
@@ -116,7 +127,7 @@ export interface LoanRecord {
   /** Principal in stroops */
   amount: bigint;
   durationDays: number;
-  /** APY in basis-points */
+  /** APY in basis-points (current effective rate) */
   interestRateBps: number;
   /** Principal + interest in stroops */
   totalDue: bigint;
@@ -132,6 +143,12 @@ export interface LoanRecord {
   collateralAsset: string;
   /** Collateral amount in asset's smallest unit */
   collateralAmount: bigint;
+  /** Interest rate model: Fixed or Floating (defaults to Fixed for backward compat) */
+  rateModel: InterestRateModel;
+  /** Baseline rate at loan creation in bps (anchors floating calculations) */
+  baseRateBps: number;
+  /** Timestamp of the last floating rate adjustment */
+  lastRateUpdate: bigint;
 }
 
 export interface PaymentRecord {
@@ -139,6 +156,7 @@ export interface PaymentRecord {
   amount: bigint;
   paidAt: bigint;
 }
+
 
 // ── Default management ────────────────────────────────────────────────────────
 
