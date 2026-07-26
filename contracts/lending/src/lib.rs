@@ -104,6 +104,11 @@ pub enum DataKey {
     WhitelistedAsset(Address),
     /// Protocol flash-loan fee in basis-points of the borrowed amount.
     FlashLoanFeeBps,
+    /// Address of the MultiSigAdmin contract — the ONLY caller authorised for
+    /// rare, high-impact configuration changes (whitelisting assets, changing
+    /// the flash-loan fee, linking governance). Once set, the plain `Admin`
+    /// address can no longer call those functions directly.
+    MultiSigAdmin,
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -148,10 +153,32 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
     }
 
-    /// Whitelist a new collateral asset (admin only)
-    pub fn whitelist_asset(env: Env, admin: Address, asset: Address) {
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    /// Once set, this is the ONLY address that may call `whitelist_asset` /
+    /// `set_flash_loan_fee_bps` / `set_governance` — the plain admin key loses
+    /// direct access to these permanently. There is no unset/reset path other
+    /// than the multisig's own internal signer governance.
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
+    /// Whitelist a new collateral asset ("adding pools"). Multisig-gated —
+    /// see `set_multisig_admin`.
+    pub fn whitelist_asset(env: Env, caller: Address, asset: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::WhitelistedAsset(asset), &true);
     }
 
@@ -169,12 +196,12 @@ impl LendingContract {
 
     // ── DAO governance of the platform fee ──────────────────────────────────────
 
-    /// Link the Governance contract (admin only, one-time bootstrap).
+    /// Link the Governance contract (multisig-gated, one-time bootstrap).
     /// Once set, the platform fee can ONLY be changed by this contract — i.e.
     /// by a successful on-chain vote.
-    pub fn set_governance(env: Env, admin: Address, governance: Address) {
-        admin.require_auth();
-        Self::assert_admin(&env, &admin);
+    pub fn set_governance(env: Env, caller: Address, governance: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Governance, &governance);
     }
 
@@ -227,10 +254,11 @@ impl LendingContract {
             .unwrap_or(DEFAULT_FLASH_LOAN_FEE_BPS)
     }
 
-    /// Update the flash-loan fee (admin only). Capped at `MAX_FLASH_LOAN_FEE_BPS`.
-    pub fn set_flash_loan_fee_bps(env: Env, admin: Address, new_fee_bps: u32) {
-        admin.require_auth();
-        Self::assert_admin(&env, &admin);
+    /// Update the flash-loan fee ("interest rate table"), multisig-gated.
+    /// Capped at `MAX_FLASH_LOAN_FEE_BPS`.
+    pub fn set_flash_loan_fee_bps(env: Env, caller: Address, new_fee_bps: u32) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         if new_fee_bps > MAX_FLASH_LOAN_FEE_BPS {
             panic!("Fee exceeds MAX_FLASH_LOAN_FEE_BPS");
         }
@@ -652,6 +680,17 @@ impl LendingContract {
             .expect("Contract not initialised");
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
+        }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured");
+        if *caller != multisig {
+            panic!("Unauthorised: caller is not the multisig admin");
         }
     }
 }

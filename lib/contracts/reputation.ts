@@ -225,8 +225,32 @@ export async function getOracleData(
   return decodeOracleData(raw);
 }
 
+/** Address of the linked MultiSigAdmin contract (issue #73). */
+export async function getMultisigAdmin(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_multisig_admin",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
 /**
- * Register / rotate the authorized oracle (admin only — admin wallet signs).
+ * One-time admin bootstrap: link the MultiSigAdmin contract. After this,
+ * `setOracle` can only be called by that multisig.
+ */
+export async function setMultisigAdmin(adminAddress: string, multisigAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_multisig_admin",
+    args: [addressToScVal(adminAddress), addressToScVal(multisigAddress)],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Register / rotate the authorized oracle (multisig only — see `setMultisigAdmin`).
  */
 export async function setOracle(adminAddress: string, oracleAddress: string) {
   return callContract({

@@ -39,6 +39,10 @@ fn setup<'a>() -> World<'a> {
     let lending_id = env.register(LendingContract, ());
     let lending = LendingContractClient::new(&env, &lending_id);
     lending.initialize(&admin);
+    // `set_governance` is multisig-gated (see the `multisig_admin` crate);
+    // `admin` stands in as its own "multisig" here since this suite is
+    // testing DAO voting, not the multisig approval flow itself.
+    lending.set_multisig_admin(&admin, &admin);
 
     // Governance contract, wired to both.
     let gov_id = env.register(GovernanceContract, ());

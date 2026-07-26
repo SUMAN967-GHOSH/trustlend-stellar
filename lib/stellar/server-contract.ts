@@ -41,6 +41,15 @@ const STROOPS_PER_XLM = 10_000_000n;
 export const xlmToStroops = (xlm: number): bigint =>
   BigInt(Math.round(xlm * Number(STROOPS_PER_XLM)));
 
+/**
+ * Encode a tuple-variant `#[contracttype]` enum (e.g. `MultiSigAdmin::AdminAction`)
+ * as `ScVec([ScSymbol(variant), field0, field1, ...])`. Unit variants use
+ * `enumToScVal` in `lib/stellar/soroban.ts`; this is the tuple-field equivalent.
+ */
+export function tupleEnumToScVal(variant: string, fields: xdr.ScVal[]): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant), ...fields]);
+}
+
 // ─── Signer ───────────────────────────────────────────────────────────────────
 
 /** Load the admin signer from ADMIN_SECRET_KEY, or null if unconfigured. */

@@ -69,6 +69,14 @@ export function enumToScVal(variant: string): xdr.ScVal {
   return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
 }
 
+/**
+ * Encode a tuple-variant #[contracttype] enum (e.g. `MultiSigAdmin::AdminAction`)
+ * as `ScVec([ScSymbol(variant), field0, field1, ...])`.
+ */
+export function tupleEnumToScVal(variant: string, fields: xdr.ScVal[]): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant), ...fields]);
+}
+
 /** Decode an ScVal returned by the contract back to a native JS value. */
 export function decodeScVal(val: xdr.ScVal): unknown {
   return scValToNative(val);
