@@ -3398,3 +3398,348 @@ a {
     transform: rotate(360deg);
   }
 }
+
+/* ── Health Factor Gauge ─────────────────────────────────────────────────── */
+
+.hf-gauge {
+  border-radius: 1rem;
+  border: 1px solid rgba(122, 138, 177, 0.2);
+  background: linear-gradient(135deg, #f9fbff 0%, #f3f5fc 100%);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  position: relative;
+  overflow: visible;
+}
+
+.dark .hf-gauge {
+  background: linear-gradient(135deg, #12152a 0%, #171b33 100%);
+  border-color: rgba(160, 167, 197, 0.18);
+}
+
+.hf-gauge__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.hf-gauge__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #28325a;
+  letter-spacing: -0.01em;
+}
+
+.dark .hf-gauge__title {
+  color: #e6e8f0;
+}
+
+/* Tooltip trigger */
+.hf-gauge__info-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.hf-gauge__info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(122, 138, 177, 0.4);
+  background: transparent;
+  color: #7a86a8;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+  line-height: 1;
+}
+
+.hf-gauge__info-btn:hover,
+.hf-gauge__info-btn:focus-visible {
+  border-color: #7e2fd0;
+  color: #7e2fd0;
+  background: rgba(126, 47, 208, 0.06);
+}
+
+.dark .hf-gauge__info-btn {
+  border-color: rgba(160, 167, 197, 0.35);
+  color: #a0a7c5;
+}
+
+.dark .hf-gauge__info-btn:hover,
+.dark .hf-gauge__info-btn:focus-visible {
+  border-color: #a78bfa;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+}
+
+.hf-gauge__tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.65rem;
+  background: #1d254a;
+  color: #e6e8f0;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 20;
+}
+
+.hf-gauge__tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1d254a;
+}
+
+.dark .hf-gauge__tooltip {
+  background: #2a2f4a;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.dark .hf-gauge__tooltip::after {
+  border-top-color: #2a2f4a;
+}
+
+.hf-gauge__info-wrap:hover .hf-gauge__tooltip,
+.hf-gauge__info-btn:focus-visible + .hf-gauge__tooltip {
+  opacity: 1;
+}
+
+.hf-gauge__tooltip strong {
+  color: #a78bfa;
+  font-weight: 700;
+}
+
+/* SVG gauge area */
+.hf-gauge__meter {
+  position: relative;
+  width: 220px;
+  height: 130px;
+}
+
+.hf-gauge__svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Numeric readout below gauge */
+.hf-gauge__value-block {
+  text-align: center;
+  margin-top: -0.5rem;
+}
+
+.hf-gauge__value {
+  font-size: 1.8rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  transition: color 0.3s ease;
+}
+
+.hf-gauge__zone-label {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: color 0.3s ease;
+}
+
+/* Simulation section */
+.hf-gauge__sim {
+  width: 100%;
+  display: grid;
+  gap: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(122, 138, 177, 0.15);
+}
+
+.dark .hf-gauge__sim {
+  border-top-color: rgba(160, 167, 197, 0.12);
+}
+
+.hf-gauge__sim-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #56658b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dark .hf-gauge__sim-title {
+  color: #a0a7c5;
+}
+
+.hf-gauge__slider-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.hf-gauge__slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.hf-gauge__slider-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #344062;
+}
+
+.dark .hf-gauge__slider-label {
+  color: #c5c9de;
+}
+
+.hf-gauge__slider-value {
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+
+/* Range slider custom styling */
+.hf-gauge__slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(122, 138, 177, 0.2);
+  outline: none;
+  cursor: pointer;
+}
+
+.dark .hf-gauge__slider {
+  background: rgba(160, 167, 197, 0.15);
+}
+
+.hf-gauge__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #7e2fd0;
+  background: white;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(126, 47, 208, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hf-gauge__slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 12px rgba(126, 47, 208, 0.4);
+}
+
+.dark .hf-gauge__slider::-webkit-slider-thumb {
+  background: #1d254a;
+  border-color: #a78bfa;
+  box-shadow: 0 2px 8px rgba(167, 139, 250, 0.3);
+}
+
+.hf-gauge__slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #7e2fd0;
+  background: white;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(126, 47, 208, 0.25);
+}
+
+.dark .hf-gauge__slider::-moz-range-thumb {
+  background: #1d254a;
+  border-color: #a78bfa;
+}
+
+/* Simulated result badge */
+.hf-gauge__sim-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.65rem;
+  background: rgba(122, 138, 177, 0.08);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dark .hf-gauge__sim-result {
+  background: rgba(160, 167, 197, 0.08);
+}
+
+.hf-gauge__sim-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: white;
+}
+
+/* Gauge zone labels */
+.hf-gauge__zone-markers {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 220px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7a86a8;
+  margin-top: -0.25rem;
+}
+
+.dark .hf-gauge__zone-markers {
+  color: #6f7696;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .hf-gauge {
+    padding: 1rem;
+  }
+  .hf-gauge__meter {
+    width: 180px;
+    height: 108px;
+  }
+  .hf-gauge__value {
+    font-size: 1.4rem;
+  }
+  .hf-gauge__tooltip {
+    width: 240px;
+  }
+}
+
+@keyframes hf-needle-enter {
+  from {
+    opacity: 0;
+    transform: rotate(-90deg);
+  }
+}
