@@ -5,7 +5,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, E
 
 /// Reputation tiers — determine loan limits and interest rates.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ReputationTier {
     None,
     Beginner,
@@ -16,7 +17,8 @@ pub enum ReputationTier {
 
 /// Reputation events — each one carries a fixed point delta.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ReputationEvent {
     TestLoanRepaid,    // +50 pts
     LoanRepaidOnTime,  // +20 pts

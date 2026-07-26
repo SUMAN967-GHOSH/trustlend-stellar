@@ -1,11 +1,12 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /// Full lifecycle status of a loan.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum LoanStatus {
     Pending,
     Approved,
@@ -60,16 +61,15 @@ pub struct PaymentRecord {
 pub enum DataKey {
     Loan(u32),
     LoanCount,
-    BorrowerLoans(Address),
-    LenderLoans(Address),
-    Payment(u32, u32), // (loan_id, payment_index)
-    PaymentCount(u32), // per loan
+    BorrowerLoanCount(Address),
+    BorrowerLoanAt(Address, u32),
+    LenderLoanCount(Address),
+    LenderLoanAt(Address, u32),
+    Payment(u32, u32),
+    PaymentCount(u32),
     Admin,
-    /// Platform fee as basis-points of interest (100 = 1.00%). DAO-controlled.
     PlatformFeeBps,
-    /// Address of the Governance contract authorised to change the fee.
     Governance,
-    /// Whitelisted collateral asset
     WhitelistedAsset(Address),
 }
 
@@ -262,7 +262,7 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::LoanCount, &loan_id);
 
         // Track per-borrower list
-        Self::push_loan_id_for_borrower(&env, &borrower, loan_id);
+        Self::store_borrower_loan_id(&env, &borrower, loan_id);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("request")),
@@ -299,7 +299,7 @@ impl LendingContract {
         loan.status = LoanStatus::Approved;
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
-        Self::push_loan_id_for_lender(&env, &lender, loan_id);
+        Self::store_lender_loan_id(&env, &lender, loan_id);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("approved")),
@@ -496,6 +496,38 @@ impl LendingContract {
         threshold.clamp(5000, 9000) as u32
     }
 
+    /// Number of loans a borrower has created.
+    pub fn get_borrower_loan_count(env: Env, borrower: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BorrowerLoanCount(borrower))
+            .unwrap_or(0)
+    }
+
+    /// Loan ID at a given index for a borrower (0-based).
+    pub fn get_borrower_loan_at(env: Env, borrower: Address, index: u32) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BorrowerLoanAt(borrower, index))
+            .expect("Index out of bounds")
+    }
+
+    /// Number of loans a lender has approved.
+    pub fn get_lender_loan_count(env: Env, lender: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LenderLoanCount(lender))
+            .unwrap_or(0)
+    }
+
+    /// Loan ID at a given index for a lender (0-based).
+    pub fn get_lender_loan_at(env: Env, lender: Address, index: u32) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LenderLoanAt(lender, index))
+            .expect("Index out of bounds")
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// interest = principal × rate_bps × days / (10_000 × 365)
@@ -511,18 +543,24 @@ impl LendingContract {
         numerator / (10_000_i128 * 365)
     }
 
-    fn push_loan_id_for_borrower(env: &Env, borrower: &Address, loan_id: u32) {
-        let key = DataKey::BorrowerLoans(borrower.clone());
-        let mut ids: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
-        ids.push_back(loan_id);
-        env.storage().persistent().set(&key, &ids);
+    fn store_borrower_loan_id(env: &Env, borrower: &Address, loan_id: u32) {
+        let count_key = DataKey::BorrowerLoanCount(borrower.clone());
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let index = count;
+        env.storage()
+            .persistent()
+            .set(&DataKey::BorrowerLoanAt(borrower.clone(), index), &loan_id);
+        env.storage().persistent().set(&count_key, &(count + 1));
     }
 
-    fn push_loan_id_for_lender(env: &Env, lender: &Address, loan_id: u32) {
-        let key = DataKey::LenderLoans(lender.clone());
-        let mut ids: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
-        ids.push_back(loan_id);
-        env.storage().persistent().set(&key, &ids);
+    fn store_lender_loan_id(env: &Env, lender: &Address, loan_id: u32) {
+        let count_key = DataKey::LenderLoanCount(lender.clone());
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let index = count;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LenderLoanAt(lender.clone(), index), &loan_id);
+        env.storage().persistent().set(&count_key, &(count + 1));
     }
 
     fn assert_admin(env: &Env, caller: &Address) {

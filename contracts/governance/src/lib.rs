@@ -17,7 +17,8 @@ use soroban_sdk::{
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ProposalStatus {
     /// Voting is open.
     Active,
@@ -31,7 +32,8 @@ pub enum ProposalStatus {
 
 /// What a proposal changes. Extensible — fee governance is the first parameter.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ProposalKind {
     /// Set the lending platform fee (basis-points of interest).
     SetPlatformFeeBps,
