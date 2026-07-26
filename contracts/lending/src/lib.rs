@@ -46,6 +46,14 @@ pub enum LoanStatus {
     Cancelled,
 }
 
+/// Interest rate model for a loan.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InterestRateModel {
+    Fixed,
+    Floating,
+}
+
 /// A single loan record.
 #[contracttype]
 #[derive(Clone)]
@@ -75,6 +83,12 @@ pub struct LoanRecord {
     pub collateral_asset: Address,
     /// Collateral amount in asset's smallest unit
     pub collateral_amount: i128,
+    /// Interest rate model: Fixed or Floating
+    pub rate_model: InterestRateModel,
+    /// Baseline rate at loan creation in bps (anchors floating calculations)
+    pub base_rate_bps: u32,
+    /// Timestamp of the last floating rate adjustment
+    pub last_rate_update: u64,
 }
 
 /// A partial/full payment record.
@@ -109,6 +123,8 @@ pub enum DataKey {
     /// the flash-loan fee, linking governance). Once set, the plain `Admin`
     /// address can no longer call those functions directly.
     MultiSigAdmin,
+    /// Tracks the last rate-model switch timestamp per loan (for cooldown).
+    RateSwitchCooldown(u32),
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -122,6 +138,12 @@ const MAX_PLATFORM_FEE_BPS: u32 = 1000;
 const DEFAULT_FLASH_LOAN_FEE_BPS: u32 = 9;
 /// Safety ceiling on the flash-loan fee (500 bps = 5 %).
 const MAX_FLASH_LOAN_FEE_BPS: u32 = 500;
+
+/// Fee for switching rate models: 0.5% of remaining debt (50 bps).
+const RATE_SWITCH_FEE_BPS: u32 = 50;
+
+/// Cooldown between rate switches: 24 hours in seconds.
+const RATE_SWITCH_COOLDOWN_SECS: u64 = 86_400;
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -339,6 +361,7 @@ impl LendingContract {
         max_loan_amount: i128,
         collateral_asset: Address,
         collateral_amount: i128,
+        rate_model: InterestRateModel,
     ) -> u32 {
         borrower.require_auth();
 
@@ -403,6 +426,9 @@ impl LendingContract {
             platform_fee,
             collateral_asset,
             collateral_amount,
+            rate_model,
+            base_rate_bps: interest_rate_bps,
+            last_rate_update: now,
         };
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
@@ -560,6 +586,120 @@ impl LendingContract {
 
         env.events()
             .publish((symbol_short!("loan"), symbol_short!("default")), loan_id);
+    }
+
+    // ── Rate model switching ─────────────────────────────────────────────────
+
+    /// Borrower switches their loan between Fixed and Floating rate models.
+    /// Charges a 0.5% fee on remaining debt and enforces a 24h cooldown.
+    pub fn switch_rate_model(env: Env, borrower: Address, loan_id: u32) {
+        borrower.require_auth();
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.borrower != borrower {
+            panic!("Caller is not the borrower");
+        }
+        if loan.status != LoanStatus::Active {
+            panic!("Can only switch rate model on ACTIVE loans");
+        }
+
+        // Enforce cooldown
+        let now = env.ledger().timestamp();
+        let last_switch: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RateSwitchCooldown(loan_id))
+            .unwrap_or(0);
+        if last_switch > 0 && (now - last_switch) < RATE_SWITCH_COOLDOWN_SECS {
+            panic!("Rate switch cooldown not elapsed (24h required)");
+        }
+
+        // Charge switch fee: 0.5% of remaining debt
+        let fee = loan
+            .remaining_due
+            .checked_mul(RATE_SWITCH_FEE_BPS as i128)
+            .expect("Overflow computing switch fee")
+            / 10_000;
+        loan.remaining_due = loan
+            .remaining_due
+            .checked_add(fee)
+            .expect("Overflow adding switch fee");
+        loan.total_due = loan
+            .total_due
+            .checked_add(fee)
+            .expect("Overflow adding switch fee to total");
+
+        // Toggle model
+        loan.rate_model = match loan.rate_model {
+            InterestRateModel::Fixed => InterestRateModel::Floating,
+            InterestRateModel::Floating => InterestRateModel::Fixed,
+        };
+        loan.last_rate_update = now;
+
+        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RateSwitchCooldown(loan_id), &now);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("rswitch")),
+            (loan_id, loan.rate_model, fee),
+        );
+    }
+
+    /// Admin updates the floating rate for a loan (called on state-changing interactions).
+    /// Only applies to Floating-rate loans. Recalculates remaining interest.
+    pub fn update_floating_rate(
+        env: Env,
+        caller: Address,
+        loan_id: u32,
+        new_rate_bps: u32,
+    ) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.rate_model != InterestRateModel::Floating {
+            panic!("Loan is not using floating rate model");
+        }
+        if loan.status != LoanStatus::Active {
+            panic!("Can only update rate on ACTIVE loans");
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Compute remaining days
+        let remaining_secs = if loan.due_at > now { loan.due_at - now } else { 0 };
+        let remaining_days = (remaining_secs / 86_400) as u32;
+
+        // Recalculate: amount already paid stays, recompute interest on remaining principal
+        let paid_so_far = loan.total_due - loan.remaining_due;
+        let remaining_principal = if loan.remaining_due > 0 {
+            // Approximate remaining principal from remaining_due and old rate
+            loan.amount
+        } else {
+            0
+        };
+
+        let new_interest =
+            Self::calculate_interest(remaining_principal, new_rate_bps, remaining_days);
+        let new_total_due = loan
+            .amount
+            .checked_add(new_interest)
+            .expect("Overflow recomputing total_due");
+        loan.total_due = new_total_due;
+        loan.remaining_due = new_total_due
+            .checked_sub(paid_so_far)
+            .expect("Underflow computing new remaining_due");
+        loan.interest_rate_bps = new_rate_bps;
+        loan.last_rate_update = now;
+
+        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("ratechg")),
+            (loan_id, new_rate_bps, loan.remaining_due),
+        );
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
