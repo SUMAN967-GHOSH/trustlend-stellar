@@ -83,6 +83,9 @@ pub enum DataKey {
     Oracle,
     /// Stores the latest OracleCreditData for a borrower
     OracleData(Address),
+    /// Address of the MultiSigAdmin contract — the ONLY caller authorised to
+    /// register the Credit Oracle (`set_oracle`).
+    MultiSigAdmin,
 }
 
 // ─── Oracle constants ───────────────────────────────────────────────────────────
@@ -188,13 +191,34 @@ impl BorrowerReputationContract {
         Self::tier_interest_rate(&profile.reputation_tier)
     }
 
-    // ── Decentralized Credit Oracle ────────────────────────────────────────────
-
-    /// Register / rotate the authorized Credit Oracle address (admin only).
-    /// Only this address may call `submit_credit_score`.
-    pub fn set_oracle(env: Env, admin: Address, oracle: Address) {
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    /// Once set, `set_oracle` can ONLY be called by this address — a
+    /// compromised single admin key can no longer redirect who is trusted to
+    /// write credit-score data.
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
+    // ── Decentralized Credit Oracle ────────────────────────────────────────────
+
+    /// Register / rotate the authorized Credit Oracle address. Multisig-gated
+    /// — see `set_multisig_admin`. Only this oracle address may call
+    /// `submit_credit_score`.
+    pub fn set_oracle(env: Env, caller: Address, oracle: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Oracle, &oracle);
         env.events()
             .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
@@ -481,6 +505,17 @@ impl BorrowerReputationContract {
             .expect("Contract not initialised");
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
+        }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured");
+        if *caller != multisig {
+            panic!("Unauthorised: caller is not the multisig admin");
         }
     }
 }

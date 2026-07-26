@@ -82,6 +82,13 @@ pub enum DataKey {
     PlatformFeeBps,
     Governance,
     WhitelistedAsset(Address),
+    /// Protocol flash-loan fee in basis-points of the borrowed amount.
+    FlashLoanFeeBps,
+    /// Address of the MultiSigAdmin contract — the ONLY caller authorised for
+    /// rare, high-impact configuration changes (whitelisting assets, changing
+    /// the flash-loan fee, linking governance). Once set, the plain `Admin`
+    /// address can no longer call those functions directly.
+    MultiSigAdmin,
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -89,6 +96,12 @@ const DEFAULT_PLATFORM_FEE_BPS: u32 = 100;
 /// Safety ceiling: the fee can never exceed 10 % of interest (1000 bps),
 /// even via a passed proposal.
 const MAX_PLATFORM_FEE_BPS: u32 = 1000;
+
+/// Default flash-loan fee = 0.09 % of the borrowed amount (9 bps) — in line
+/// with common DeFi flash-loan pricing.
+const DEFAULT_FLASH_LOAN_FEE_BPS: u32 = 9;
+/// Safety ceiling on the flash-loan fee (500 bps = 5 %).
+const MAX_FLASH_LOAN_FEE_BPS: u32 = 500;
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -120,10 +133,32 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
     }
 
-    /// Whitelist a new collateral asset (admin only)
-    pub fn whitelist_asset(env: Env, admin: Address, asset: Address) {
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    /// Once set, this is the ONLY address that may call `whitelist_asset` /
+    /// `set_flash_loan_fee_bps` / `set_governance` — the plain admin key loses
+    /// direct access to these permanently. There is no unset/reset path other
+    /// than the multisig's own internal signer governance.
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
+    /// Whitelist a new collateral asset ("adding pools"). Multisig-gated —
+    /// see `set_multisig_admin`.
+    pub fn whitelist_asset(env: Env, caller: Address, asset: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::WhitelistedAsset(asset), &true);
     }
 
@@ -141,12 +176,12 @@ impl LendingContract {
 
     // ── DAO governance of the platform fee ──────────────────────────────────────
 
-    /// Link the Governance contract (admin only, one-time bootstrap).
+    /// Link the Governance contract (multisig-gated, one-time bootstrap).
     /// Once set, the platform fee can ONLY be changed by this contract — i.e.
     /// by a successful on-chain vote.
-    pub fn set_governance(env: Env, admin: Address, governance: Address) {
-        admin.require_auth();
-        Self::assert_admin(&env, &admin);
+    pub fn set_governance(env: Env, caller: Address, governance: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Governance, &governance);
     }
 
@@ -186,6 +221,87 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::PlatformFeeBps, &new_fee_bps);
+    }
+
+    // ── Flash loans ──────────────────────────────────────────────────────────
+
+    /// Current flash-loan fee in basis-points of the borrowed amount
+    /// (default 9 = 0.09 %).
+    pub fn get_flash_loan_fee_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FlashLoanFeeBps)
+            .unwrap_or(DEFAULT_FLASH_LOAN_FEE_BPS)
+    }
+
+    /// Update the flash-loan fee ("interest rate table"), multisig-gated.
+    /// Capped at `MAX_FLASH_LOAN_FEE_BPS`.
+    pub fn set_flash_loan_fee_bps(env: Env, caller: Address, new_fee_bps: u32) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+        if new_fee_bps > MAX_FLASH_LOAN_FEE_BPS {
+            panic!("Fee exceeds MAX_FLASH_LOAN_FEE_BPS");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::FlashLoanFeeBps, &new_fee_bps);
+    }
+
+    /// Uncollateralized, single-transaction flash loan against the pool's own
+    /// balance of `token`.
+    ///
+    /// Flow (all within this one call, hence one atomic ledger transaction):
+    ///   1. Verify the pool holds at least `amount` of `token`.
+    ///   2. Transfer `amount` of `token` to `receiver`.
+    ///   3. Invoke `receiver.execute_operation(token, amount, fee, self, params)`
+    ///      — the receiver's arbitrage/re-leveraging logic runs here and MUST
+    ///      transfer `amount + fee` back to this contract before returning.
+    ///   4. Verify the pool's balance grew by at least `fee`; if not, PANIC.
+    ///
+    /// A panic anywhere in this call — including inside the receiver's own
+    /// callback — aborts the WHOLE transaction on Soroban, so step 2's transfer
+    /// is rolled back along with everything else. There is no code path that
+    /// leaves the pool short: either the loan is fully repaid plus fee, or the
+    /// entire transaction (including the initial disbursement) never happened.
+    pub fn flash_loan(env: Env, receiver: Address, token: Address, amount: i128, params: Bytes) {
+        if amount <= 0 {
+            panic!("Flash loan amount must be positive");
+        }
+
+        let token_client = token::Client::new(&env, &token);
+        let pool = env.current_contract_address();
+        let balance_before = token_client.balance(&pool);
+
+        if balance_before < amount {
+            panic!("Insufficient pool liquidity for flash loan");
+        }
+
+        let fee_bps = Self::get_flash_loan_fee_bps(env.clone());
+        let fee = amount
+            .checked_mul(fee_bps as i128)
+            .expect("Overflow computing flash loan fee")
+            / 10_000;
+        let required_after = balance_before
+            .checked_add(fee)
+            .expect("Overflow computing required post-loan balance");
+
+        // 2. Disburse the borrowed amount to the receiver.
+        token_client.transfer(&pool, &receiver, &amount);
+
+        // 3. Hand control to the receiver's callback.
+        let receiver_client = FlashLoanReceiverClient::new(&env, &receiver);
+        receiver_client.execute_operation(&token, &amount, &fee, &pool, &params);
+
+        // 4. Enforce full repayment (principal + fee) — or roll back everything.
+        let balance_after = token_client.balance(&pool);
+        if balance_after < required_after {
+            panic!("Flash loan not repaid: insufficient funds returned");
+        }
+
+        env.events().publish(
+            (symbol_short!("flash"), symbol_short!("loan")),
+            (receiver, token, amount, fee),
+        );
     }
 
     // ── Loan lifecycle ────────────────────────────────────────────────────────
@@ -586,6 +702,17 @@ impl LendingContract {
             .expect("Contract not initialised");
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
+        }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured");
+        if *caller != multisig {
+            panic!("Unauthorised: caller is not the multisig admin");
         }
     }
 }

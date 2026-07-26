@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *'  # runs every day at 2am UTC
   workflow_dispatch:  # lets you run it manually too
 
+permissions:
+  contents: read
+
 jobs:
   backup:
     runs-on: ubuntu-latest

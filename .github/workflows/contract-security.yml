@@ -7,6 +7,9 @@ on:
       - 'contracts/**'
       - '.github/workflows/contract-security.yml'
 
+permissions:
+  contents: read
+
 jobs:
   clippy:
     name: Run Cargo Clippy

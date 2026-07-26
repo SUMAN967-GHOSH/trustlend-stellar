@@ -10,6 +10,7 @@ import {
   addressToScVal,
   u32ToScVal,
   i128ToScVal,
+  bytesToScVal,
 } from "@/lib/stellar/soroban";
 import type { LoanRecord, LoanStatus, PaymentRecord } from "@/types/contracts";
 
@@ -122,7 +123,44 @@ export async function getGovernance(callerAddress: string): Promise<string> {
   return result as string;
 }
 
+/** Current flash-loan fee in basis-points of the borrowed amount (default 9 = 0.09%). */
+export async function getFlashLoanFeeBps(callerAddress: string): Promise<number> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_flash_loan_fee_bps",
+    args: [],
+    callerAddress,
+  });
+  return Number(result);
+}
+
+/** Address of the linked MultiSigAdmin contract (issue #73). */
+export async function getMultisigAdmin(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_multisig_admin",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
 // ─── Write functions ──────────────────────────────────────────────────────────
+
+/**
+ * One-time admin bootstrap: link the MultiSigAdmin contract. After this,
+ * `whitelistAsset` / `setFlashLoanFeeBps` / `setGovernance` can only be
+ * called by that multisig — the plain admin key loses direct access
+ * permanently.
+ */
+export async function setMultisigAdmin(adminAddress: string, multisigAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_multisig_admin",
+    args: [addressToScVal(adminAddress), addressToScVal(multisigAddress)],
+    callerAddress: adminAddress,
+  });
+}
 
 /**
  * One-time admin bootstrap: link the Governance contract. After this, the
@@ -134,6 +172,45 @@ export async function setGovernance(adminAddress: string, governanceAddress: str
     method: "set_governance",
     args: [addressToScVal(adminAddress), addressToScVal(governanceAddress)],
     callerAddress: adminAddress,
+  });
+}
+
+/** Update the flash-loan fee, capped on-chain at 500 bps (5%) (admin only). */
+export async function setFlashLoanFeeBps(adminAddress: string, newFeeBps: number) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_flash_loan_fee_bps",
+    args: [addressToScVal(adminAddress), u32ToScVal(newFeeBps)],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Execute an uncollateralized flash loan against the pool's balance of `token`.
+ *
+ * `receiverAddress` must be a deployed contract implementing the
+ * `FlashLoanReceiver` callback interface (`execute_operation(token, amount,
+ * fee, initiator, params)`). It must transfer back `amount + fee` of `token`
+ * to this LendingContract before its callback returns, or the whole
+ * transaction — including the initial disbursement — reverts on-chain.
+ */
+export async function flashLoan(
+  callerAddress: string,
+  receiverAddress: string,
+  tokenAddress: string,
+  amountStroops: bigint,
+  params: Uint8Array = new Uint8Array()
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "flash_loan",
+    args: [
+      addressToScVal(receiverAddress),
+      addressToScVal(tokenAddress),
+      i128ToScVal(amountStroops),
+      bytesToScVal(params),
+    ],
+    callerAddress,
   });
 }
 
