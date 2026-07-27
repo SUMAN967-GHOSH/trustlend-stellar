@@ -1,8 +1,14 @@
 "use client";
 
 import { Networks } from "@stellar/stellar-sdk";
+import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit";
+import { FreighterModule } from "@creit.tech/stellar-wallets-kit/modules/freighter";
+import { AlbedoModule } from "@creit.tech/stellar-wallets-kit/modules/albedo";
+import { WalletConnectModule } from "@creit.tech/stellar-wallets-kit/modules/wallet-connect";
+// The kit expects its own Networks enum for some methods, which has identical values to stellar-sdk
+import { Networks as KitNetworks } from "@creit.tech/stellar-wallets-kit/types";
 
-export type StellarWalletProvider = "freighter" | "albedo";
+export type StellarWalletProvider = "freighter" | "albedo" | "walletconnect";
 
 export interface ConnectedWallet {
   provider: StellarWalletProvider;
@@ -19,130 +25,105 @@ export interface SignTransactionParams {
 const WALLET_PROVIDER_STORAGE_KEY = "wallet_provider";
 const WALLET_ADDRESS_STORAGE_KEY = "wallet_address";
 
-export function getWalletProviderLabel(
-  provider: StellarWalletProvider,
-): string {
-  return provider === "albedo" ? "Albedo" : "Freighter";
+export function getWalletProviderLabel(provider: StellarWalletProvider): string {
+  if (provider === "albedo") return "Albedo";
+  if (provider === "walletconnect") return "WalletConnect";
+  return "Freighter";
 }
 
 export function getStoredWalletProvider(): StellarWalletProvider {
-  if (typeof window === "undefined") {
-    return "freighter";
-  }
-
+  if (typeof window === "undefined") return "freighter";
   const stored = window.localStorage.getItem(WALLET_PROVIDER_STORAGE_KEY);
-  return stored === "albedo" ? "albedo" : "freighter";
+  if (stored === "albedo") return "albedo";
+  if (stored === "walletconnect") return "walletconnect";
+  return "freighter";
 }
 
-export function setStoredWalletProvider(
-  provider: StellarWalletProvider | null,
-) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
+export function setStoredWalletProvider(provider: StellarWalletProvider | null) {
+  if (typeof window === "undefined") return;
   if (!provider) {
     window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
     return;
   }
-
   window.localStorage.setItem(WALLET_PROVIDER_STORAGE_KEY, provider);
 }
 
-function resolveAlbedoNetwork(networkPassphrase: string): "testnet" | "public" {
-  return networkPassphrase === Networks.PUBLIC ? "public" : "testnet";
+let kitInitialized = false;
+
+function ensureKit(): void {
+  if (typeof window === "undefined") {
+    throw new Error("StellarWalletsKit can only be initialized in the browser.");
+  }
+  
+  if (!kitInitialized) {
+    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "16e6f0cf5c4b78c66a4f9103de534d02"; // Standard placeholder for testing
+    
+    StellarWalletsKit.init({
+      network: KitNetworks.TESTNET,
+      modules: [
+        new FreighterModule(),
+        new AlbedoModule(),
+        new WalletConnectModule({
+          projectId,
+          metadata: {
+            name: "TrustLend",
+            description: "TrustLend - P2P Lending on Stellar",
+            url: window.location.origin,
+            icons: ["https://stellar.org/favicon.ico"]
+          }
+        })
+      ]
+    });
+    kitInitialized = true;
+  }
 }
 
-async function connectFreighter(): Promise<ConnectedWallet> {
-  const { getAddress, getNetworkDetails, isConnected, requestAccess } =
-    await import("@stellar/freighter-api");
-
-  const connectionStatus = await isConnected();
-  if (connectionStatus.error) {
-    throw new Error("Freighter wallet was not detected in this browser.");
+function mapProviderToModuleId(provider: StellarWalletProvider): string {
+  switch (provider) {
+    case "freighter": return "freighter";
+    case "albedo": return "albedo";
+    case "walletconnect": return "walletconnect"; 
   }
-
-  const networkDetails = await getNetworkDetails();
-  if (networkDetails.error) {
-    throw new Error(
-      networkDetails.error.message ??
-        "Unable to read Freighter network details.",
-    );
-  }
-
-  if (networkDetails.networkPassphrase !== Networks.TESTNET) {
-    throw new Error("Switch Freighter to Stellar Testnet and try again.");
-  }
-
-  const access = await requestAccess();
-  if (access.error) {
-    throw new Error(
-      access.error.message ?? "Wallet access request was declined.",
-    );
-  }
-
-  const connectedAddress = access.address || (await getAddress()).address;
-  if (!connectedAddress) {
-    throw new Error("Freighter did not return a public address.");
-  }
-
-  return { provider: "freighter", address: connectedAddress };
 }
 
-async function connectAlbedo(): Promise<ConnectedWallet> {
-  const albedoPackage = await import("@albedo-link/intent");
-  const albedo = albedoPackage.default;
-  const result = await albedo.publicKey({ token: `trustlend:${Date.now()}` });
-
-  if (!result.pubkey) {
-    throw new Error("Albedo did not return a public address.");
+export async function connectWallet(provider: StellarWalletProvider): Promise<ConnectedWallet> {
+  ensureKit();
+  let moduleId = mapProviderToModuleId(provider);
+  
+  // Actually, some modules might have specific IDs in the kit.
+  // The module ids are typically "freighter", "albedo", "walletconnect"
+  
+  StellarWalletsKit.setWallet(moduleId);
+  
+  const { address } = await StellarWalletsKit.getAddress();
+  
+  if (!address) {
+    throw new Error(`Failed to get address from ${getWalletProviderLabel(provider)}.`);
   }
 
-  return { provider: "albedo", address: result.pubkey };
+  setStoredWalletProvider(provider);
+  return { provider, address };
 }
 
-export async function connectWallet(
-  provider: StellarWalletProvider,
-): Promise<ConnectedWallet> {
-  const wallet =
-    provider === "albedo" ? await connectAlbedo() : await connectFreighter();
-  setStoredWalletProvider(wallet.provider);
-  return wallet;
-}
-
-export async function getConnectedWallet(
-  provider?: StellarWalletProvider,
-): Promise<ConnectedWallet> {
+export async function getConnectedWallet(provider?: StellarWalletProvider): Promise<ConnectedWallet> {
   const selectedProvider = provider ?? getStoredWalletProvider();
-
-  if (selectedProvider === "albedo") {
-    if (typeof window !== "undefined") {
-      const storedAddress = window.localStorage.getItem(
-        WALLET_ADDRESS_STORAGE_KEY,
-      );
-      if (storedAddress) {
-        return { provider: "albedo", address: storedAddress };
-      }
+  
+  if (typeof window !== "undefined") {
+    const storedAddress = window.localStorage.getItem(WALLET_ADDRESS_STORAGE_KEY);
+    if (storedAddress) {
+       // Just silently set the kit's active module
+       try {
+         ensureKit();
+         StellarWalletsKit.setWallet(mapProviderToModuleId(selectedProvider));
+       } catch (e) {
+         console.warn("Failed to silently set wallet kit module", e);
+       }
+       return { provider: selectedProvider, address: storedAddress };
     }
-
-    return connectAlbedo();
   }
 
-  const { getAddress, isConnected } = await import("@stellar/freighter-api");
-  const connectionStatus = await isConnected();
-  if (!connectionStatus.isConnected) {
-    throw new Error(
-      "Freighter is not connected. Open Freighter and try again.",
-    );
-  }
-
-  const addressResult = await getAddress();
-  if (addressResult.error || !addressResult.address) {
-    throw new Error("Could not get wallet address from Freighter.");
-  }
-
-  setStoredWalletProvider("freighter");
-  return { provider: "freighter", address: addressResult.address };
+  // If no stored address, attempt to connect
+  return connectWallet(selectedProvider);
 }
 
 export async function signTransactionWithWallet({
@@ -156,39 +137,19 @@ export async function signTransactionWithWallet({
   provider: StellarWalletProvider;
 }> {
   const selectedProvider = provider ?? getStoredWalletProvider();
+  ensureKit();
+  
+  StellarWalletsKit.setWallet(mapProviderToModuleId(selectedProvider));
 
-  if (selectedProvider === "albedo") {
-    const albedoPackage = await import("@albedo-link/intent");
-    const albedo = albedoPackage.default;
-    const result = await albedo.tx({
-      xdr,
-      pubkey: address,
-      network: resolveAlbedoNetwork(networkPassphrase),
-      submit: false,
-    });
-
-    if (!result.signed_envelope_xdr) {
-      throw new Error("Transaction rejected in Albedo.");
-    }
-
-    return {
-      signedTxXdr: result.signed_envelope_xdr,
-      signerAddress: address,
-      provider: "albedo",
-    };
-  }
-
-  const { signTransaction } = await import("@stellar/freighter-api");
-  const result = await signTransaction(xdr, { networkPassphrase, address });
-  if (result.error || !result.signedTxXdr) {
-    throw new Error(
-      result.error?.message ?? "Transaction rejected in Freighter.",
-    );
-  }
+  // The kit expects options to be passed
+  const { signedTxXdr, signerAddress } = await StellarWalletsKit.signTransaction(xdr, {
+    networkPassphrase,
+    address,
+  });
 
   return {
-    signedTxXdr: result.signedTxXdr,
-    signerAddress: result.signerAddress,
-    provider: "freighter",
+    signedTxXdr,
+    signerAddress,
+    provider: selectedProvider,
   };
 }

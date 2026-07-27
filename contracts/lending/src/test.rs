@@ -751,6 +751,9 @@ fn test_switch_rate_model_fixed_to_floating() {
 fn test_switch_rate_model_cooldown_enforced() {
     let (env, contract_id, admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
+    
+    // Seed timestamp so `last_switch` doesn't record as 0 (the 'never switched' sentinel)
+    env.ledger().set_timestamp(1_000_000_000);
 
     let loan_id = create_and_activate_loan(
         &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
@@ -769,6 +772,8 @@ fn test_switch_rate_model_cooldown_enforced() {
 fn test_switch_rate_model_allowed_after_cooldown() {
     let (env, contract_id, admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
+
+    env.ledger().set_timestamp(1_000_000_000);
 
     let loan_id = create_and_activate_loan(
         &env, &client, &admin, &borrower, &collateral_asset, &InterestRateModel::Fixed,
