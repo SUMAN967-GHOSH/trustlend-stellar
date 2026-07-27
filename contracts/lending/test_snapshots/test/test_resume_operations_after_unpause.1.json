@@ -13,28 +13,6 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "whitelist_asset",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "function_name": "setup_multisig",
               "args": [
                 {
@@ -55,6 +33,28 @@
                 },
                 {
                   "u32": 2
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "whitelist_asset",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 }
               ]
             }
@@ -179,6 +179,13 @@
                     "hi": 0,
                     "lo": 1000000000000
                   }
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Fixed"
+                    }
+                  ]
                 }
               ]
             }
@@ -297,6 +304,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "base_rate_bps"
+                      },
+                      "val": {
+                        "u32": 1500
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "borrower"
                       },
                       "val": {
@@ -372,6 +387,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_rate_update"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "lender"
                       },
                       "val": {
@@ -387,6 +410,18 @@
                           "hi": 0,
                           "lo": 1232876
                         }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "rate_model"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Fixed"
+                          }
+                        ]
                       }
                     },
                     {

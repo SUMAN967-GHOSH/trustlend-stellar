@@ -127,6 +127,22 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "MultisigAdmins"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "WhitelistedAsset"
                             },
                             {
