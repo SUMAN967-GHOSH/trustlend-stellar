@@ -5,9 +5,8 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    contract, contractimpl,
-    testutils::{Address as _, Ledger},
-    token, Address, Bytes, Env,
+    testutils::{Address as _, Events, Ledger},
+    Address, Env,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -334,332 +333,288 @@ fn test_liquidation_threshold_extreme_inputs_no_overflow() {
     assert!((5000..=9000).contains(&threshold));
 }
 
-// ─── Flash loan tests ───────────────────────────────────────────────────────────
+// ─── Pausable / Multi-sig tests ──────────────────────────────────────────────
 
-// ── Mock receiver contracts ─────────────────────────────────────────────────────
-// Each implements the `FlashLoanReceiver` callback interface that any protocol
-// wanting to consume a TrustLend flash loan must expose. Each lives in its own
-// module: `#[contractimpl]` generates module-level symbols keyed by method name,
-// which collide if two `impl FlashLoanReceiver for ...` blocks share a module.
-
-/// Repays the loan in full (amount + fee). Represents a well-behaved
-/// arbitrageur/re-leveraging strategy that turned a profit covering the fee.
-mod good_receiver {
-    use super::*;
-
-    #[contract]
-    pub struct GoodReceiver;
-
-    #[contractimpl]
-    impl FlashLoanReceiver for GoodReceiver {
-        fn execute_operation(
-            env: Env,
-            token: Address,
-            amount: i128,
-            fee: i128,
-            initiator: Address,
-            _params: Bytes,
-        ) {
-            let token_client = token::Client::new(&env, &token);
-            token_client.transfer(&env.current_contract_address(), &initiator, &(amount + fee));
-        }
-    }
-}
-use good_receiver::GoodReceiver;
-
-/// Never repays anything — simulates a malicious or buggy receiver.
-mod stingy_receiver {
-    use super::*;
-
-    #[contract]
-    pub struct StingyReceiver;
-
-    #[contractimpl]
-    impl FlashLoanReceiver for StingyReceiver {
-        fn execute_operation(
-            _env: Env,
-            _token: Address,
-            _amount: i128,
-            _fee: i128,
-            _initiator: Address,
-            _params: Bytes,
-        ) {
-            // Intentionally does nothing — keeps the borrowed funds.
-        }
-    }
-}
-use stingy_receiver::StingyReceiver;
-
-/// Repays only the principal, not the fee.
-mod partial_receiver {
-    use super::*;
-
-    #[contract]
-    pub struct PartialReceiver;
-
-    #[contractimpl]
-    impl FlashLoanReceiver for PartialReceiver {
-        fn execute_operation(
-            env: Env,
-            token: Address,
-            amount: i128,
-            _fee: i128,
-            initiator: Address,
-            _params: Bytes,
-        ) {
-            let token_client = token::Client::new(&env, &token);
-            token_client.transfer(&env.current_contract_address(), &initiator, &amount);
-        }
-    }
-}
-use partial_receiver::PartialReceiver;
-
-/// Repays more than required — should still succeed (>= check, not ==).
-mod generous_receiver {
-    use super::*;
-
-    #[contract]
-    pub struct GenerousReceiver;
-
-    #[contractimpl]
-    impl FlashLoanReceiver for GenerousReceiver {
-        fn execute_operation(
-            env: Env,
-            token: Address,
-            amount: i128,
-            fee: i128,
-            initiator: Address,
-            _params: Bytes,
-        ) {
-            let token_client = token::Client::new(&env, &token);
-            token_client.transfer(
-                &env.current_contract_address(),
-                &initiator,
-                &(amount + fee + 1_000),
-            );
-        }
-    }
-}
-use generous_receiver::GenerousReceiver;
-
-// ── Helpers ──────────────────────────────────────────────────────────────────────
-
-/// Sets up a lending contract + a SEP-41 test token, with `pool_liquidity`
-/// minted directly into the pool (the lending contract's own balance).
-fn setup_flash(pool_liquidity: i128) -> (Env, Address, Address, token::Client<'static>) {
+fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = Address::generate(&env);
     let contract_id = env.register(LendingContract, ());
-    let client_addr = contract_id.clone();
     let client = LendingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let signer1 = Address::generate(&env);
+    let signer2 = Address::generate(&env);
+
     client.initialize(&admin);
-    client.set_multisig_admin(&admin, &admin);
+    let collateral_asset = Address::generate(&env);
+    client.whitelist_asset(&admin, &collateral_asset);
 
-    let sac = env.register_stellar_asset_contract_v2(admin.clone());
-    let token_id = sac.address();
-    let asset_client = token::StellarAssetClient::new(&env, &token_id);
-    asset_client.mint(&client_addr, &pool_liquidity);
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone(), signer2.clone()];
+    client.setup_multisig(&admin, &admins, &2);
 
-    let token_client = token::Client::new(&env, &token_id);
-    (env, contract_id, token_id, token_client)
-}
-
-/// Pre-funds `receiver` with `extra` tokens (its own capital / "profit") so it
-/// can cover the flash-loan fee on top of the amount it borrows.
-fn fund_receiver(env: &Env, token_id: &Address, receiver: &Address, extra: i128) {
-    let asset_client = token::StellarAssetClient::new(env, token_id);
-    asset_client.mint(receiver, &extra);
-}
-
-// ── Success cases ─────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_flash_loan_success_full_repayment() {
-    let pool_liquidity: i128 = 1_000_000_0000000; // 1,000,000 XLM
-    let (env, contract_id, token_id, token_client) = setup_flash(pool_liquidity);
-    let client = LendingContractClient::new(&env, &contract_id);
-
-    let receiver_id = env.register(GoodReceiver, ());
-    let borrow_amount: i128 = 100_000_0000000; // 100,000 XLM
-
-    // Default fee = 9 bps = 0.09%.
-    let expected_fee = borrow_amount * 9 / 10_000;
-    fund_receiver(&env, &token_id, &receiver_id, expected_fee);
-
-    client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
-
-    // Pool ends up with its original liquidity PLUS the fee.
-    assert_eq!(token_client.balance(&contract_id), pool_liquidity + expected_fee);
-    // Receiver ends with zero — it borrowed, used, and repaid everything.
-    assert_eq!(token_client.balance(&receiver_id), 0);
+    (env, contract_id, admin, borrower, collateral_asset, signer1, signer2)
 }
 
 #[test]
-fn test_flash_loan_accepts_overpayment() {
-    let pool_liquidity: i128 = 500_000_0000000;
-    let (env, contract_id, token_id, token_client) = setup_flash(pool_liquidity);
+fn test_setup_multisig() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(GenerousReceiver, ());
-    let borrow_amount: i128 = 10_000_0000000;
-    let expected_fee = borrow_amount * 9 / 10_000;
-    fund_receiver(&env, &token_id, &receiver_id, expected_fee + 1_000);
-
-    client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
-
-    // Pool gained the fee AND the extra 1_000 stroops the receiver overpaid.
-    assert_eq!(token_client.balance(&contract_id), pool_liquidity + expected_fee + 1_000);
+    let admins = client.get_multisig_admins();
+    assert_eq!(admins.len(), 3);
+    assert!(admins.iter().any(|a| a == admin));
+    assert!(admins.iter().any(|a| a == signer1));
+    assert!(admins.iter().any(|a| a == signer2));
+    assert_eq!(client.get_multisig_threshold(), 2);
+    assert!(!client.is_paused());
 }
 
 #[test]
-fn test_flash_loan_emits_correct_fee_for_custom_bps() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, token_client) = setup_flash(pool_liquidity);
-    let client = LendingContractClient::new(&env, &contract_id);
-    let admin = client.get_admin();
-
-    client.set_flash_loan_fee_bps(&admin, &50); // 0.50 %
-    assert_eq!(client.get_flash_loan_fee_bps(), 50);
-
-    let receiver_id = env.register(GoodReceiver, ());
-    let borrow_amount: i128 = 100_000_0000000;
-    let expected_fee = borrow_amount * 50 / 10_000;
-    fund_receiver(&env, &token_id, &receiver_id, expected_fee);
-
-    client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
-    assert_eq!(token_client.balance(&contract_id), pool_liquidity + expected_fee);
-}
-
-// ── Failure / rollback cases ────────────────────────────────────────────────────
-
-#[test]
-#[should_panic(expected = "Flash loan not repaid")]
-fn test_flash_loan_reverts_when_receiver_repays_nothing() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Threshold must be at least 1")]
+fn test_setup_multisig_zero_threshold_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(StingyReceiver, ());
-    let borrow_amount: i128 = 100_000_0000000;
-
-    client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1, signer2];
+    client.setup_multisig(&admin, &admins, &0);
 }
 
 #[test]
-#[should_panic(expected = "Flash loan not repaid")]
-fn test_flash_loan_reverts_on_partial_repayment() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Threshold exceeds number of admins")]
+fn test_setup_multisig_threshold_too_high_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    // Repays principal but not the fee — must still be rejected.
-    let receiver_id = env.register(PartialReceiver, ());
-    let borrow_amount: i128 = 100_000_0000000;
-
-    client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
+    let admins = soroban_sdk::vec![&env, signer1, signer2];
+    client.setup_multisig(&admin, &admins, &5);
 }
 
 #[test]
-fn test_failed_flash_loan_rolls_back_pool_balance() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Signer has already authorised pause")]
+fn test_duplicate_pause_signer_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(StingyReceiver, ());
-    let borrow_amount: i128 = 100_000_0000000;
-
-    // Catch the panic without poisoning the test — asserts the transaction
-    // (including the initial disbursement) was fully rolled back.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.flash_loan(&receiver_id, &token_id, &borrow_amount, &Bytes::new(&env));
-    }));
-    assert!(result.is_err(), "flash loan should have panicked");
-
-    // Pool balance is untouched — the disbursed `amount` was rolled back too.
-    assert_eq!(token_client.balance(&contract_id), pool_liquidity);
-    assert_eq!(token_client.balance(&receiver_id), 0);
+    // Admin calls pause twice
+    client.pause(&admin);
+    client.pause(&admin);
 }
 
 #[test]
-fn test_pool_usable_again_immediately_after_a_failed_flash_loan() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, token_client) = setup_flash(pool_liquidity);
+fn test_pause_activates_with_threshold() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
-    let borrow_amount: i128 = 100_000_0000000;
 
-    // 1) A failing attempt against a StingyReceiver...
-    let bad_receiver = env.register(StingyReceiver, ());
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.flash_loan(&bad_receiver, &token_id, &borrow_amount, &Bytes::new(&env));
-    }));
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 0);
 
-    // 2) ...must not leave the pool short for a subsequent, well-behaved borrower.
-    let good_receiver = env.register(GoodReceiver, ());
-    let expected_fee = borrow_amount * 9 / 10_000;
-    fund_receiver(&env, &token_id, &good_receiver, expected_fee);
+    // First signer (below threshold)
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 1);
 
-    client.flash_loan(&good_receiver, &token_id, &borrow_amount, &Bytes::new(&env));
-    assert_eq!(token_client.balance(&contract_id), pool_liquidity + expected_fee);
+    // Second signer reaches threshold (2) -> paused
+    client.pause(&signer1);
+    assert!(client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 0); // reset after activation
 }
 
 #[test]
-#[should_panic(expected = "Insufficient pool liquidity")]
-fn test_flash_loan_rejects_amount_over_pool_liquidity() {
-    let pool_liquidity: i128 = 1_000_0000000; // only 1,000 XLM in the pool
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Contract is paused")]
+fn test_create_loan_request_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(GoodReceiver, ());
-    // Ask for far more than the pool holds.
-    client.flash_loan(&receiver_id, &token_id, &(pool_liquidity * 2), &Bytes::new(&env));
+    // Pause with 2 signers
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
 }
 
 #[test]
-#[should_panic(expected = "must be positive")]
-fn test_flash_loan_rejects_zero_amount() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Contract is paused")]
+fn test_approve_loan_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(GoodReceiver, ());
-    client.flash_loan(&receiver_id, &token_id, &0, &Bytes::new(&env));
+    // Create a loan while unpaused
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
 }
 
 #[test]
-#[should_panic(expected = "must be positive")]
-fn test_flash_loan_rejects_negative_amount() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Contract is paused")]
+fn test_mark_defaulted_blocked_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
 
-    let receiver_id = env.register(GoodReceiver, ());
-    client.flash_loan(&receiver_id, &token_id, &-1, &Bytes::new(&env));
+    // Create + approve + activate a loan while unpaused
+    let lender = Address::generate(&env);
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Try to mark defaulted
+    client.mark_defaulted(&admin, &loan_id);
 }
 
 #[test]
-#[should_panic(expected = "Unauthorised")]
-fn test_only_admin_can_change_flash_loan_fee() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+fn test_record_payment_allowed_when_paused() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
-    let _ = token_id;
 
-    let attacker = Address::generate(&env);
-    client.set_flash_loan_fee_bps(&attacker, &10);
+    let lender = Address::generate(&env);
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Repayments should still work
+    let status = client.record_payment(&admin, &loan_id, &500_0000000);
+    assert_eq!(status, LoanStatus::Active);
 }
 
 #[test]
-#[should_panic(expected = "exceeds MAX_FLASH_LOAN_FEE_BPS")]
-fn test_flash_loan_fee_capped() {
-    let pool_liquidity: i128 = 1_000_000_0000000;
-    let (env, contract_id, token_id, _token_client) = setup_flash(pool_liquidity);
+#[should_panic(expected = "Contract is not paused")]
+fn test_unpause_when_not_paused_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
     let client = LendingContractClient::new(&env, &contract_id);
-    let _ = token_id;
-    let admin = client.get_admin();
 
-    client.set_flash_loan_fee_bps(&admin, &501); // > MAX_FLASH_LOAN_FEE_BPS (500)
+    client.unpause(&admin);
+}
+
+#[test]
+fn test_unpause_deactivates_with_threshold() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause first
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause with 2 signers
+    client.unpause(&admin);
+    assert!(client.is_paused()); // still paused (1 < threshold 2)
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised unpause")]
+fn test_duplicate_unpause_signer_rejected() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause first
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Try to unpause with same signer twice
+    client.unpause(&admin);
+    client.unpause(&admin);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_non_admin_cannot_pause() {
+    let (env, contract_id, _admin, _borrower, _collateral_asset, _signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    client.pause(&random);
+}
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_pause_without_multisig_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LendingContract, ());
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // No setup_multisig called
+    client.pause(&admin);
+}
+
+#[test]
+fn test_resume_operations_after_unpause() {
+    let (env, contract_id, admin, borrower, collateral_asset, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause
+    client.unpause(&admin);
+    client.unpause(&signer2);
+    assert!(!client.is_paused());
+
+    // Create a loan again — should work
+    let loan_id = client.create_loan_request(
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+    );
+    assert_eq!(loan_id, 1);
+}
+
+#[test]
+fn test_multisig_admin_can_still_use_admin_functions_when_paused() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Admin should still be able to whitelist assets
+    let new_asset = Address::generate(&env);
+    client.whitelist_asset(&admin, &new_asset);
+    assert!(client.is_asset_whitelisted(&new_asset));
+}
+
+#[test]
+fn test_pause_unpause_events_emitted() {
+    let (env, contract_id, admin, _borrower, _collateral_asset, signer1, _signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // One "paused" event is emitted when the threshold is met
+    let events = env.events().all();
+    assert!(!events.is_empty());
 }
 
 // ─── Interest rate model tests ────────────────────────────────────────────────
