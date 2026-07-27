@@ -1,7 +1,20 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Vec,
 };
+use soroban_sdk::token;
+
+#[contractclient(name = "FlashLoanReceiverClient")]
+pub trait FlashLoanReceiver {
+    fn execute_operation(
+        env: Env,
+        token: Address,
+        amount: i128,
+        fee: i128,
+        pool: Address,
+        params: Bytes,
+    );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +100,8 @@ pub enum DataKey {
     Governance,
     /// Whitelisted collateral asset
     WhitelistedAsset(Address),
+    /// Link to MultiSigAdmin contract
+    MultiSigAdmin,
     /// List of multisig admin addresses
     MultisigAdmins,
     /// Number of admin signatures required to pause/unpause
@@ -101,6 +116,10 @@ pub enum DataKey {
     UnpauseSigner(Address),
     /// Number of unique signers who have called unpause
     UnpauseSignerCount,
+    /// Flash loan fee bps
+    FlashLoanFeeBps,
+    /// Cooldown timestamp for rate switches
+    RateSwitchCooldown(u32),
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -292,8 +311,8 @@ impl LendingContract {
             .unwrap_or(0)
     }
 
-    /// Whitelist a new collateral asset (admin only)
-    pub fn whitelist_asset(env: Env, admin: Address, asset: Address) {
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         if env.storage().instance().has(&DataKey::MultiSigAdmin) {
