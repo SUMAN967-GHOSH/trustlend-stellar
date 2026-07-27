@@ -642,6 +642,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "UncollectedFees"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 821917
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "WhitelistedAsset"
                             },
                             {

@@ -120,6 +120,8 @@ pub enum DataKey {
     FlashLoanFeeBps,
     /// Cooldown timestamp for rate switches
     RateSwitchCooldown(u32),
+    /// Uncollected accrued platform fees for Treasury collection
+    UncollectedFees,
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -400,6 +402,24 @@ impl LendingContract {
             .set(&DataKey::PlatformFeeBps, &new_fee_bps);
     }
 
+    pub fn get_uncollected_fees(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::UncollectedFees).unwrap_or(0)
+    }
+
+    pub fn collect_fees(env: Env, caller: Address, treasury_address: Address) -> i128 {
+        caller.require_auth();
+        let uncollected: i128 = Self::get_uncollected_fees(env.clone());
+        if uncollected <= 0 {
+            return 0;
+        }
+        env.storage().instance().set(&DataKey::UncollectedFees, &0i128);
+        env.events().publish(
+            (symbol_short!("fees"), symbol_short!("collected")),
+            (treasury_address, uncollected),
+        );
+        uncollected
+    }
+
     // ── Flash loans ──────────────────────────────────────────────────────────
 
     /// Current flash-loan fee in basis-points of the borrowed amount
@@ -569,6 +589,9 @@ impl LendingContract {
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
         env.storage().instance().set(&DataKey::LoanCount, &loan_id);
+
+        let current_fees: i128 = env.storage().instance().get(&DataKey::UncollectedFees).unwrap_or(0);
+        env.storage().instance().set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
 
         // Track per-borrower list
         Self::push_loan_id_for_borrower(&env, &borrower, loan_id);
