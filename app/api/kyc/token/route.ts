@@ -17,7 +17,7 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
  *  4. Generate a short-lived SDK token
  *  5. Return { applicantId, token, expiresAt } to the browser
  */
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     // ── 1. Auth ──────────────────────────────────────────────────────────────
     const { user } = await requireAuthenticatedUser("borrower");

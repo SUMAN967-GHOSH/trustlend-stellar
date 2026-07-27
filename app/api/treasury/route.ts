@@ -24,7 +24,7 @@ export interface TreasuryMetrics {
 }
 
 // Mock/Initial Treasury State
-let mockTreasuryState: TreasuryMetrics = {
+const mockTreasuryState: TreasuryMetrics = {
   currentBalance: 12500.50,
   totalCollected: 45000.00,
   totalDistributedInsurance: 16249.75,
