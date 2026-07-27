@@ -337,6 +337,9 @@ impl BorrowerReputationContract {
             panic!("Multisig admin already configured");
         }
         env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        let mut msig_admins = Vec::new(&env);
+        msig_admins.push_back(multisig);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
     }
 
     pub fn get_multisig_admin(env: Env) -> Address {

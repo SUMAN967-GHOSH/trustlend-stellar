@@ -43,7 +43,6 @@ fn setup<'a>() -> World<'a> {
     // `admin` stands in as its own "multisig" here since this suite is
     // testing DAO voting, not the multisig approval flow itself.
     lending.set_multisig_admin(&admin, &admin);
-    lending.setup_multisig(&admin, &soroban_sdk::vec![&env, admin.clone()], &1);
 
     // Governance contract, wired to both.
     let gov_id = env.register(GovernanceContract, ());

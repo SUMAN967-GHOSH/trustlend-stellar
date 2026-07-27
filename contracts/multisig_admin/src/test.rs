@@ -244,7 +244,7 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
 // ─── The security property this whole issue is about ───────────────────────────
 
 #[test]
-#[should_panic(expected = "Unauthorised: caller is not the multisig admin")]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
 fn test_direct_call_by_the_original_admin_is_rejected() {
     let w = setup();
     // Even the ORIGINAL single admin — the one who bootstrapped the link in
