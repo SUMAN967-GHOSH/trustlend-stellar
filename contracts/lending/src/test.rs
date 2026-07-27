@@ -432,7 +432,7 @@ fn test_create_loan_request_blocked_when_paused() {
     client.pause(&signer1);
 
     client.create_loan_request(
-        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
     );
 }
 
@@ -444,7 +444,7 @@ fn test_approve_loan_blocked_when_paused() {
 
     // Create a loan while unpaused
     let loan_id = client.create_loan_request(
-        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
     );
 
     // Pause
@@ -464,7 +464,7 @@ fn test_mark_defaulted_blocked_when_paused() {
     // Create + approve + activate a loan while unpaused
     let lender = Address::generate(&env);
     let loan_id = client.create_loan_request(
-        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
     );
     client.approve_loan(&lender, &loan_id, &1);
     client.activate_loan(&admin, &loan_id);
@@ -484,7 +484,7 @@ fn test_record_payment_allowed_when_paused() {
 
     let lender = Address::generate(&env);
     let loan_id = client.create_loan_request(
-        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
     );
     client.approve_loan(&lender, &loan_id, &1);
     client.activate_loan(&admin, &loan_id);
@@ -582,7 +582,7 @@ fn test_resume_operations_after_unpause() {
 
     // Create a loan again — should work
     let loan_id = client.create_loan_request(
-        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000,
+        &borrower, &1_000_0000000, &30, &1500, &100_000_0000000, &collateral_asset, &100_000_0000000, &InterestRateModel::Fixed,
     );
     assert_eq!(loan_id, 1);
 }
@@ -621,7 +621,7 @@ fn test_pause_unpause_events_emitted() {
 
 /// Helper: creates and activates a loan, returning its ID.
 fn create_and_activate_loan(
-    env: &Env,
+    _env: &Env,
     client: &LendingContractClient,
     admin: &Address,
     borrower: &Address,

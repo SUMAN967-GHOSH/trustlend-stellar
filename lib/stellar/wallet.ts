@@ -1,6 +1,5 @@
 "use client";
 
-import { Networks } from "@stellar/stellar-sdk";
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit";
 import { FreighterModule } from "@creit.tech/stellar-wallets-kit/modules/freighter";
 import { AlbedoModule } from "@creit.tech/stellar-wallets-kit/modules/albedo";
@@ -88,7 +87,7 @@ function mapProviderToModuleId(provider: StellarWalletProvider): string {
 
 export async function connectWallet(provider: StellarWalletProvider): Promise<ConnectedWallet> {
   ensureKit();
-  let moduleId = mapProviderToModuleId(provider);
+  const moduleId = mapProviderToModuleId(provider);
   
   // Actually, some modules might have specific IDs in the kit.
   // The module ids are typically "freighter", "albedo", "walletconnect"
