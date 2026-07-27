@@ -26,6 +26,7 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     // integration tests; here `admin` stands in as its own "multisig" so the
     // rest of this suite can focus on loan-lifecycle behaviour.
     client.set_multisig_admin(&admin, &admin);
+    client.setup_multisig(&admin, &soroban_sdk::vec![&env, admin.clone()], &1);
 
     let collateral_asset = Address::generate(&env);
     client.whitelist_asset(&admin, &collateral_asset);
