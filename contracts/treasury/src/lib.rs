@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, IntoVal, Symbol,
+    Vec,
 };
 
 #[cfg(test)]
@@ -76,6 +77,16 @@ impl TreasuryContract {
         env.storage().instance().set(&DataKey::TotalDistributedInsurance, &0i128);
         env.storage().instance().set(&DataKey::TotalDistributedDao, &0i128);
         env.storage().instance().set(&DataKey::DistributionCount, &0u32);
+    }
+
+    /// Upgrade the contract's code while preserving its storage.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if caller != admin {
+            panic!("Unauthorised caller");
+        }
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     /// Update 50/50 split ratios (admin only).

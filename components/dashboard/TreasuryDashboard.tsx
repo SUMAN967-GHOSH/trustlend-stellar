@@ -77,7 +77,7 @@ export function TreasuryDashboard() {
       } else {
         setMessage(result.error || "Action failed");
       }
-    } catch (err) {
+    } catch (_err) {
       setMessage("Failed to execute action");
     } finally {
       setActionLoading(null);

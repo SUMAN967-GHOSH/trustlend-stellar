@@ -17,7 +17,7 @@
 //! once the threshold is met) → cross-contract call into the target action.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, vec, Address, Env, IntoVal, Symbol, Val,
+    contract, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, IntoVal, Symbol, Val,
     Vec,
 };
 
@@ -66,6 +66,8 @@ pub enum AdminAction {
     RemoveSigner(Address),
     /// Change the approval threshold. Fields: `(new_threshold,)`.
     SetThreshold(u32),
+    /// Upgrade another contract via cross-contract call. Fields: `(target, new_wasm_hash)`.
+    UpgradeContract(Address, BytesN<32>),
 }
 
 #[contracttype]
@@ -122,6 +124,13 @@ impl MultiSigAdminContract {
         env.storage().instance().set(&DataKey::Signers, &signers);
         env.storage().instance().set(&DataKey::Threshold, &threshold);
         env.storage().instance().set(&DataKey::ProposalCount, &0u32);
+    }
+
+    /// Upgrade this multisig contract's code while preserving its storage.
+    /// This requires a successful self-proposal (`UpgradeContract` targeting this contract's ID).
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        env.current_contract_address().require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     // ── Reads ────────────────────────────────────────────────────────────────────
@@ -326,6 +335,10 @@ impl MultiSigAdminContract {
                     &Symbol::new(env, "trigger_insurance_payout"),
                     args,
                 );
+            }
+            AdminAction::UpgradeContract(target, new_wasm_hash) => {
+                let args: Vec<Val> = vec![env, me.into_val(env), new_wasm_hash.into_val(env)];
+                env.invoke_contract::<()>(target, &Symbol::new(env, "upgrade"), args);
             }
             AdminAction::AddSigner(new_signer) => Self::do_add_signer(env, new_signer.clone()),
             AdminAction::RemoveSigner(signer) => Self::do_remove_signer(env, signer.clone()),
