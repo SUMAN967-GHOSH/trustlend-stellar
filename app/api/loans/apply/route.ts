@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { requireKycVerified } from "@/lib/kyc/middleware";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 export async function POST(request: NextRequest) {
@@ -15,6 +16,15 @@ export async function POST(request: NextRequest) {
     const supabase = await getServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
+    }
+
+    // ── KYC guard: regulated pools require verified identity ─────────────────
+    const kycCheck = await requireKycVerified(user.id, supabase);
+    if (!kycCheck.allowed) {
+      return NextResponse.json(
+        { error: kycCheck.reason, kycStatus: kycCheck.kycStatus },
+        { status: 403 }
+      );
     }
 
     // ── Parse body ──────────────────────────────────────────────────────────
