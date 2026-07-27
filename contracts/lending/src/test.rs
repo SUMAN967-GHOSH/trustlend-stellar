@@ -6,7 +6,7 @@ extern crate std;
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    token, Address, Env, IntoVal, Symbol,
+    token, Address, Env,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1167,6 +1167,9 @@ fn mint_tokens(env: &Env, token: &Address, recipient: &Address, amount: i128) {
 
 // ─── Flash Loan Tests ─────────────────────────────────────────────────────────
 
+/// Default flash-loan fee in basis points (0.09 %).
+const DEFAULT_FLASH_LOAN_FEE_BPS: i128 = 9;
+
 /// Happy path: receiver repays exactly amount + fee, pool gains the fee.
 #[test]
 fn test_flash_loan_success_full_repayment() {
@@ -1174,9 +1177,9 @@ fn test_flash_loan_success_full_repayment() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     let receiver_id = env.register(good_receiver::GoodReceiver, ());
-    let loan_amount: i128 = 1_000_0000000; // 100 XLM
-    let fee = loan_amount * 9 / 10_000; // default 9 bps
-                                        // Receiver needs `fee` tokens of its own to complete repayment
+    let loan_amount: i128 = 1_000_0000000; // 1 000 XLM
+    let fee = loan_amount * DEFAULT_FLASH_LOAN_FEE_BPS / 10_000;
+    // Receiver needs `fee` tokens of its own to complete repayment
     mint_tokens(&env, &token_address, &receiver_id, fee);
 
     let pool_before = token::Client::new(&env, &token_address).balance(&contract_id);
@@ -1198,7 +1201,7 @@ fn test_flash_loan_accepts_overpayment() {
 
     let receiver_id = env.register(generous_receiver::GenerousReceiver, ());
     let loan_amount: i128 = 1_000_0000000;
-    let fee = loan_amount * 9 / 10_000;
+    let fee = loan_amount * DEFAULT_FLASH_LOAN_FEE_BPS / 10_000;
     // GenerousReceiver repays fee + 100 extra, so it needs that much
     mint_tokens(&env, &token_address, &receiver_id, fee + 100);
 
@@ -1215,7 +1218,7 @@ fn test_flash_loan_accepts_overpayment() {
 
 /// Admin adjusts the flash-loan fee; the new rate is applied correctly.
 #[test]
-fn test_flash_loan_emits_correct_fee_for_custom_bps() {
+fn test_flash_loan_applies_custom_fee_bps() {
     let (env, contract_id, admin, _borrower, token_address) = setup_flash_loan();
     let client = LendingContractClient::new(&env, &contract_id);
 
@@ -1278,22 +1281,18 @@ fn test_flash_loan_reverts_on_partial_repayment() {
 #[test]
 fn test_failed_flash_loan_rolls_back_pool_balance() {
     let (env, contract_id, _admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
 
     let receiver_id = env.register(stingy_receiver::StingyReceiver, ());
     let loan_amount: i128 = 1_000_0000000;
 
     let pool_before = token::Client::new(&env, &token_address).balance(&contract_id);
 
-    let result = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
-        &contract_id,
-        &Symbol::new(&env, "flash_loan"),
-        soroban_sdk::vec![
-            &env,
-            receiver_id.into_val(&env),
-            token_address.into_val(&env),
-            loan_amount.into_val(&env),
-            Bytes::new(&env).into_val(&env),
-        ],
+    let result = client.try_flash_loan(
+        &receiver_id,
+        &token_address,
+        &loan_amount,
+        &Bytes::new(&env),
     );
     assert!(result.is_err(), "flash_loan should have panicked");
 
@@ -1314,21 +1313,12 @@ fn test_pool_usable_again_immediately_after_a_failed_flash_loan() {
     let loan_amount: i128 = 1_000_0000000;
 
     // First attempt fails (stingy receiver repays nothing)
-    let _result = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
-        &contract_id,
-        &Symbol::new(&env, "flash_loan"),
-        soroban_sdk::vec![
-            &env,
-            stingy_id.into_val(&env),
-            token_address.into_val(&env),
-            loan_amount.into_val(&env),
-            Bytes::new(&env).into_val(&env),
-        ],
-    );
+    let result = client.try_flash_loan(&stingy_id, &token_address, &loan_amount, &Bytes::new(&env));
+    assert!(result.is_err(), "flash_loan should have panicked");
 
     // Second attempt with a GoodReceiver must succeed
     let good_id = env.register(good_receiver::GoodReceiver, ());
-    let fee = loan_amount * 9 / 10_000;
+    let fee = loan_amount * DEFAULT_FLASH_LOAN_FEE_BPS / 10_000;
     mint_tokens(&env, &token_address, &good_id, fee);
 
     let pool_before = token::Client::new(&env, &token_address).balance(&contract_id);
@@ -1397,4 +1387,29 @@ fn test_flash_loan_fee_capped() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     client.set_flash_loan_fee_bps(&admin, &501);
+}
+
+/// Fee set to exactly MAX_FLASH_LOAN_FEE_BPS (500 bps) is accepted.
+#[test]
+fn test_flash_loan_fee_at_max_boundary_accepted() {
+    let (env, contract_id, admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.set_flash_loan_fee_bps(&admin, &500);
+    assert_eq!(client.get_flash_loan_fee_bps(), 500);
+
+    let receiver_id = env.register(good_receiver::GoodReceiver, ());
+    let loan_amount: i128 = 1_000_0000000;
+    let expected_fee = loan_amount * 500 / 10_000;
+    mint_tokens(&env, &token_address, &receiver_id, expected_fee);
+
+    let pool_before = token::Client::new(&env, &token_address).balance(&contract_id);
+    client.flash_loan(
+        &receiver_id,
+        &token_address,
+        &loan_amount,
+        &Bytes::new(&env),
+    );
+    let pool_after = token::Client::new(&env, &token_address).balance(&contract_id);
+    assert_eq!(pool_after, pool_before + expected_fee);
 }
