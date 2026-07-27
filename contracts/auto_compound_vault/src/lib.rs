@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, BytesN,
 };
 
 #[cfg(test)]
@@ -240,5 +240,14 @@ impl AutoCompoundVaultContract {
         }
         let total_managed = Self::get_total_managed_assets(env);
         (total_managed * PRECISION) / total_shares
+    }
+
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if caller != admin {
+            panic!("Unauthorised caller");
+        }
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 }
