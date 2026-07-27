@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec, BytesN};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,9 +50,14 @@ pub enum DataKey {
     InsuranceEvent(u32),
     InsuranceEventCount,
     Admin,
-    /// Address of the MultiSigAdmin contract — the ONLY caller authorised to
-    /// move insurance-fund balances (`add_to_insurance` / `trigger_insurance_payout`).
     MultiSigAdmin,
+    MultisigAdmins,
+    MultisigThreshold,
+    IsPaused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    UnpauseSigner(Address),
+    UnpauseSignerCount,
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -77,6 +82,145 @@ impl DefaultManagementContract {
             .set(&DataKey::InsuranceEventCount, &0u32);
     }
 
+    /// Upgrade the contract's code while preserving its storage.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Configure multi-sig admin set for pause/unpause.
+    pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if threshold > admins.len() {
+            panic!("Threshold exceeds number of admins");
+        }
+
+        let mut final_admins = admins;
+        if !final_admins.iter().any(|a| a == admin) {
+            final_admins.push_back(admin);
+        }
+
+        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+    }
+
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is already paused");
+        }
+
+        let signer_key = DataKey::PauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised pause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &true);
+            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("defmgmt"), symbol_short!("paused")),
+                (),
+            );
+        }
+    }
+
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised unpause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &false);
+            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("defmgmt"), symbol_short!("unpaused")),
+                (),
+            );
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn get_multisig_admins(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_multisig_threshold(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigThreshold)
+            .unwrap_or(1)
+    }
+
+    pub fn get_pause_signer_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0)
+    }
+
     pub fn get_admin(env: Env) -> Address {
         env.storage()
             .instance()
@@ -94,6 +238,9 @@ impl DefaultManagementContract {
             panic!("Multisig admin already configured");
         }
         env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        let mut msig_admins = Vec::new(&env);
+        msig_admins.push_back(multisig);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
     }
 
     pub fn get_multisig_admin(env: Env) -> Address {
@@ -120,6 +267,7 @@ impl DefaultManagementContract {
     ) -> DefaultPhase {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let phase = Self::days_to_phase(days_overdue);
 
@@ -181,7 +329,8 @@ impl DefaultManagementContract {
         amount: i128,
     ) {
         caller.require_auth();
-        Self::assert_multisig_admin(&env, &caller);
+        Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let balance = Self::get_insurance_balance(env.clone());
         if balance < amount {
@@ -240,6 +389,14 @@ impl DefaultManagementContract {
     }
 
     fn assert_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if !multisig_admins.is_empty() && multisig_admins.iter().any(|a| a == *caller) {
+            return;
+        }
         let admin: Address = env
             .storage()
             .instance()
@@ -251,13 +408,30 @@ impl DefaultManagementContract {
     }
 
     fn assert_multisig_admin(env: &Env, caller: &Address) {
-        let multisig: Address = env
+        let multisig_admins: Vec<Address> = env
             .storage()
             .instance()
-            .get(&DataKey::MultiSigAdmin)
-            .expect("Multisig admin not configured");
-        if *caller != multisig {
-            panic!("Unauthorised: caller is not the multisig admin");
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if multisig_admins.is_empty() {
+            panic!("Multisig not configured");
+        }
+        if !multisig_admins.iter().any(|a| a == *caller) {
+            panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    fn assert_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
         }
     }
 }
+
+#[cfg(test)]
+mod test;

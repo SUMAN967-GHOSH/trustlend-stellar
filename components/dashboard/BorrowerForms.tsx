@@ -10,13 +10,14 @@ import {
 
 interface LoanApplicationFormProps {
   maxAmount: number;
-  onSubmit: (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => Promise<void>;
+  onSubmit: (amount: number, duration: number, collateralAsset: string, collateralAmount: number, rateModel: "fixed" | "floating") => Promise<void>;
 }
 export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationFormProps) {
   const [amount, setAmount] = useState("");
   const [duration, setDuration] = useState("60");
   const [collateralAsset, setCollateralAsset] = useState("");
   const [collateralAmount, setCollateralAmount] = useState("");
+  const [rateModel, setRateModel] = useState<"fixed" | "floating">("fixed");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -40,11 +41,12 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
         setError("Collateral amount must be positive");
         return;
       }
-      await onSubmit(amountNum, parseInt(duration), collateralAsset, collateralAmountNum);
+      await onSubmit(amountNum, parseInt(duration), collateralAsset, collateralAmountNum, rateModel);
       setAmount("");
       setDuration("60");
       setCollateralAsset("");
       setCollateralAmount("");
+      setRateModel("fixed");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit application");
     } finally {
@@ -109,6 +111,42 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
           className="workspace-input"
           disabled={loading}
         />
+      </div>
+
+      <div>
+        <label className="workspace-label">Interest Rate Model</label>
+        <div className="rate-model-selector" style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="rateModel"
+              value="fixed"
+              checked={rateModel === "fixed"}
+              onChange={() => setRateModel("fixed")}
+              disabled={loading}
+              style={{ marginTop: '0.25rem' }}
+            />
+            <div>
+              <strong>Fixed Rate</strong>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>Lock in your rate. Predictable payments.</p>
+            </div>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="rateModel"
+              value="floating"
+              checked={rateModel === "floating"}
+              onChange={() => setRateModel("floating")}
+              disabled={loading}
+              style={{ marginTop: '0.25rem' }}
+            />
+            <div>
+              <strong>Floating Rate</strong>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>Starts lower, adjusts with market.</p>
+            </div>
+          </label>
+        </div>
       </div>
 
       {error && <p className="workspace-error">{error}</p>}
@@ -264,13 +302,13 @@ export function BorrowerForms({
   const [, setSorobanLoading] = useState(false);
   const pendingLoans = loans.filter((loan) => String(loan.status) === "requested");
 
-  const handleLoanApplication = async (amount: number, duration: number, collateralAsset: string, collateralAmount: number) => {
+  const handleLoanApplication = async (amount: number, duration: number, collateralAsset: string, collateralAmount: number, rateModel: "fixed" | "floating") => {
     setSorobanLoading(true);
     try {
       const response = await fetch("/api/loans/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default", collateral_asset: collateralAsset, collateral_amount: collateralAmount }),
+        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default", collateral_asset: collateralAsset, collateral_amount: collateralAmount, rateModel }),
       });
 
       if (!response.ok) {
@@ -306,7 +344,8 @@ export function BorrowerForms({
             onChainRate,
             onChainMax,
             collateralAsset,
-            collateralAmountStroops
+            collateralAmountStroops,
+            rateModel === "fixed" ? "Fixed" : "Floating"
           );
 
           console.log("[TrustLend] Soroban loan request recorded.");

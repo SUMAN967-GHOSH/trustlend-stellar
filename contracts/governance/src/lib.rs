@@ -10,8 +10,8 @@
 //! *vote only*.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, vec, Address, Env, IntoVal, Symbol, Val,
-    Vec,
+    contract, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, IntoVal, Symbol,
+    Val, Vec,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -122,6 +122,16 @@ impl GovernanceContract {
         };
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::ProposalCount, &0u32);
+    }
+
+    /// Upgrade the contract's code while preserving its storage.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        let config = Self::config(&env);
+        if caller != config.admin {
+            panic!("Unauthorised caller");
+        }
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     pub fn get_config(env: Env) -> GovConfig {

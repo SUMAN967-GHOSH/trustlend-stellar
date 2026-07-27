@@ -88,6 +88,13 @@
                     "hi": 0,
                     "lo": 1000000000000
                   }
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Fixed"
+                    }
+                  ]
                 }
               ]
             }
@@ -207,6 +214,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "base_rate_bps"
+                      },
+                      "val": {
+                        "u32": 1500
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "borrower"
                       },
                       "val": {
@@ -282,6 +297,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_rate_update"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "lender"
                       },
                       "val": {
@@ -297,6 +320,18 @@
                           "hi": 0,
                           "lo": 150000000
                         }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "rate_model"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Fixed"
+                          }
+                        ]
                       }
                     },
                     {
@@ -399,6 +434,37 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "MultisigAdmins"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "UncollectedFees"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 150000000
+                          }
                         }
                       },
                       {

@@ -11,6 +11,7 @@ import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } 
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
+import { HealthFactorGauge } from "@/components/dashboard/HealthFactorGauge";
 import {
   getIndexedBorrowerReadModel,
   isIndexerConfigured,
@@ -58,7 +59,7 @@ export default async function BorrowerDashboardPage() {
           .maybeSingle(),
         supabase
           .from("loans")
-          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at, created_at")
+          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at, created_at, metadata")
           .eq("borrower_id", user.id)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -116,7 +117,14 @@ export default async function BorrowerDashboardPage() {
     const status = String(loan.status ?? "requested");
     const hasFundingLedger = fundedLoanIds.has(String(loan.id));
     const effectiveStatus = status === "requested" && hasFundingLedger ? "funded" : status;
-    return { ...loan, effectiveStatus };
+    
+    // Extract rate model from metadata, default to fixed for backward compatibility
+    let rateModel = "fixed";
+    if (loan.metadata && typeof loan.metadata === "object" && "rate_model" in loan.metadata) {
+      rateModel = String(loan.metadata.rate_model);
+    }
+    
+    return { ...loan, effectiveStatus, rateModel };
   });
 
   const kycStatus = String(profile?.kyc_status ?? "pending");
@@ -145,6 +153,21 @@ export default async function BorrowerDashboardPage() {
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
+
+  // ── Health Factor computation ──────────────────────────────────────────
+  // Outstanding debt across all active loans (in XLM, converted to an approximate USD value).
+  // Uses a conservative placeholder XLM price; in production this would come from the oracle.
+  const XLM_PRICE_USD = 0.10;
+  const totalDebtXlm = activeLoans.reduce(
+    (sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)),
+    0,
+  ) / 10_000_000;
+  const totalDebtUsd = totalDebtXlm * XLM_PRICE_USD;
+  // Collateral value — approximated as 150% of outstanding debt when active loans exist
+  // (the Soroban lending contract requires over-collateralization at loan creation).
+  // A real implementation would read collateral amounts from on-chain loan records.
+  const totalCollateralUsd = activeLoans.length > 0 ? totalDebtUsd * 1.5 : 0;
+  const showHealthFactor = activeLoans.length > 0 && totalDebtUsd > 0;
 
   const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
     if (s === "requested")                    return "yellow";
@@ -251,6 +274,16 @@ export default async function BorrowerDashboardPage() {
           )}
         </div>
 
+        {/* ── Health Factor Gauge ── */}
+        {showHealthFactor && (
+          <HealthFactorGauge
+            collateralValueUsd={totalCollateralUsd}
+            debtValueUsd={totalDebtUsd}
+            collateralAssetSymbol="USD"
+            debtAssetSymbol="XLM"
+          />
+        )}
+
         {/* ── Loan Cards ── */}
         {normalizedLoans.length > 0 && (
           <div className="borrower-loan-section">
@@ -282,7 +315,16 @@ export default async function BorrowerDashboardPage() {
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
                           </td>
-                        <td style={{ padding: "0.75rem" }}>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</td>
+                        <td style={{ padding: "0.75rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <span>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</span>
+                            <Badge 
+                              variant={loan.rateModel === "floating" ? "blue" : "yellow"}
+                            >
+                              {loan.rateModel === "floating" ? "FLOATING" : "FIXED"}
+                            </Badge>
+                          </div>
+                        </td>
                         <td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
                           {loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "—"}
                         </td>

@@ -12,7 +12,7 @@ import {
   i128ToScVal,
   bytesToScVal,
 } from "@/lib/stellar/soroban";
-import type { LoanRecord, LoanStatus, PaymentRecord } from "@/types/contracts";
+import type { LoanRecord, LoanStatus, PaymentRecord, InterestRateModel } from "@/types/contracts";
 
 const CONTRACT_ID = process.env.NEXT_PUBLIC_LENDING_CONTRACT_ID!;
 
@@ -226,8 +226,11 @@ export async function createLoanRequest(
   interestRateBps: number,
   maxLoanAmountStroops: bigint,
   collateralAssetAddress: string,
-  collateralAmount: bigint
+  collateralAmount: bigint,
+  rateModel: InterestRateModel = "Fixed",
 ): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rateModelScVal = { type: "symbol", value: rateModel } as any;
   const result = await callContract({
     contractId: CONTRACT_ID,
     method: "create_loan_request",
@@ -239,6 +242,7 @@ export async function createLoanRequest(
       i128ToScVal(maxLoanAmountStroops),
       addressToScVal(collateralAssetAddress),
       i128ToScVal(collateralAmount),
+      rateModelScVal,
     ],
     callerAddress: borrowerAddress,
   });
@@ -361,6 +365,45 @@ export async function markLoanDefaulted(adminAddress: string, loanId: number) {
   });
 }
 
+// ─── Rate model functions ─────────────────────────────────────────────────────
+
+/**
+ * Borrower switches their loan between Fixed and Floating rate models.
+ * Charges a 0.5% fee on remaining debt and enforces a 24h cooldown.
+ */
+export async function switchRateModel(
+  borrowerAddress: string,
+  loanId: number,
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "switch_rate_model",
+    args: [addressToScVal(borrowerAddress), u32ToScVal(loanId)],
+    callerAddress: borrowerAddress,
+  });
+}
+
+/**
+ * Admin updates the floating rate for a loan. Only applies to Floating-rate loans.
+ * Recalculates remaining interest with the new rate.
+ */
+export async function updateFloatingRate(
+  adminAddress: string,
+  loanId: number,
+  newRateBps: number,
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "update_floating_rate",
+    args: [
+      addressToScVal(adminAddress),
+      u32ToScVal(loanId),
+      u32ToScVal(newRateBps),
+    ],
+    callerAddress: adminAddress,
+  });
+}
+
 // ─── Decoders ─────────────────────────────────────────────────────────────────
 
 function decodeLoan(raw: unknown): LoanRecord {
@@ -381,6 +424,9 @@ function decodeLoan(raw: unknown): LoanRecord {
     platformFee: BigInt(r.platform_fee as string | number),
     collateralAsset: r.collateral_asset as string,
     collateralAmount: BigInt(r.collateral_amount as string | number),
+    rateModel: (extractEnumVariant(r.rate_model) as InterestRateModel) ?? "Fixed",
+    baseRateBps: Number(r.base_rate_bps ?? r.interest_rate_bps),
+    lastRateUpdate: BigInt((r.last_rate_update ?? r.created_at ?? 0) as string | number),
   };
 }
 

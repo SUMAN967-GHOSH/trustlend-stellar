@@ -1,5 +1,6 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { ProfileSettingsForm } from "@/components/dashboard/ProfileSettingsForm";
+import { KycVerificationWidget } from "@/components/dashboard/KycVerificationWidget";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import {
   getBorrowerDashboardMetrics,
@@ -7,6 +8,7 @@ import {
 } from "@/lib/dashboard/metrics";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+
 
 // Compliance status config
 const KYC_CONFIG: Record<
@@ -61,7 +63,7 @@ export default async function BorrowerProfilePage() {
   const { data: profile } = supabase
     ? await supabase
         .from("profiles")
-        .select("full_name, phone, date_of_birth, role, country_code, kyc_status, risk_status, government_id_url, kyc_submitted_at")
+        .select("full_name, phone, date_of_birth, role, country_code, kyc_status, risk_status, government_id_url, kyc_submitted_at, kyc_provider_id")
         .eq("id", user.id)
         .maybeSingle()
     : { data: null as Record<string, unknown> | null };
@@ -209,6 +211,26 @@ export default async function BorrowerProfilePage() {
             kycStatus={kycStatusKey}
             hasGovId={hasGovId}
           />
+
+          {/* ── KYC Verification Widget ── */}
+          <div style={{ marginTop: "1.5rem", paddingTop: "1.5rem", borderTop: "1px solid rgba(126,47,208,0.1)" }}>
+            <h3
+              style={{
+                fontSize: "0.85rem",
+                fontWeight: 700,
+                color: "#374151",
+                marginBottom: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              🔐 3rd-Party KYC Verification
+            </h3>
+            <KycVerificationWidget
+              kycStatus={kycStatusKey}
+              kycProviderId={profile?.kyc_provider_id ? String(profile.kyc_provider_id) : null}
+            />
+          </div>
         </article>
 
         {/* ── RIGHT: Compliance + Security ── */}

@@ -1,5 +1,20 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Vec,
+};
+use soroban_sdk::token;
+
+#[contractclient(name = "FlashLoanReceiverClient")]
+pub trait FlashLoanReceiver {
+    fn execute_operation(
+        env: Env,
+        token: Address,
+        amount: i128,
+        fee: i128,
+        pool: Address,
+        params: Bytes,
+    );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +29,14 @@ pub enum LoanStatus {
     Repaid,
     Defaulted,
     Cancelled,
+}
+
+/// Interest rate model for a loan.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InterestRateModel {
+    Fixed,
+    Floating,
 }
 
 /// A single loan record.
@@ -56,6 +79,12 @@ pub struct LoanRecord {
     pub collateral_asset: Address,
     /// Collateral amount in asset's smallest unit
     pub collateral_amount: i128,
+    /// Interest rate model: Fixed or Floating
+    pub rate_model: InterestRateModel,
+    /// Baseline rate at loan creation in bps (anchors floating calculations)
+    pub base_rate_bps: u32,
+    /// Timestamp of the last floating rate adjustment
+    pub last_rate_update: u64,
 }
 
 /// A partial/full payment record.
@@ -82,13 +111,28 @@ pub enum DataKey {
     PlatformFeeBps,
     Governance,
     WhitelistedAsset(Address),
-    /// Protocol flash-loan fee in basis-points of the borrowed amount.
-    FlashLoanFeeBps,
-    /// Address of the MultiSigAdmin contract — the ONLY caller authorised for
-    /// rare, high-impact configuration changes (whitelisting assets, changing
-    /// the flash-loan fee, linking governance). Once set, the plain `Admin`
-    /// address can no longer call those functions directly.
+    /// Link to MultiSigAdmin contract
     MultiSigAdmin,
+    /// List of multisig admin addresses
+    MultisigAdmins,
+    /// Number of admin signatures required to pause/unpause
+    MultisigThreshold,
+    /// Whether the contract is paused
+    IsPaused,
+    /// Whether a given signer has already called pause (dedup)
+    PauseSigner(Address),
+    /// Number of unique signers who have called pause
+    PauseSignerCount,
+    /// Whether a given signer has already called unpause (dedup)
+    UnpauseSigner(Address),
+    /// Number of unique signers who have called unpause
+    UnpauseSignerCount,
+    /// Flash loan fee bps
+    FlashLoanFeeBps,
+    /// Cooldown timestamp for rate switches
+    RateSwitchCooldown(u32),
+    /// Uncollected accrued platform fees for Treasury collection
+    UncollectedFees,
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -102,6 +146,12 @@ const MAX_PLATFORM_FEE_BPS: u32 = 1000;
 const DEFAULT_FLASH_LOAN_FEE_BPS: u32 = 9;
 /// Safety ceiling on the flash-loan fee (500 bps = 5 %).
 const MAX_FLASH_LOAN_FEE_BPS: u32 = 500;
+
+/// Fee for switching rate models: 0.5% of remaining debt (50 bps).
+const RATE_SWITCH_FEE_BPS: u32 = 50;
+
+/// Cooldown between rate switches: 24 hours in seconds.
+const RATE_SWITCH_COOLDOWN_SECS: u64 = 86_400;
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -133,11 +183,155 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
     }
 
+    /// Upgrade the contract's code while preserving its storage.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Configure multi-sig admin set for pause/unpause.
+    /// The original single admin is automatically included.
+    /// `threshold` must be >= 1 and <= admins.len().
+    pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if threshold > admins.len() {
+            panic!("Threshold exceeds number of admins");
+        }
+
+        // Ensure the single admin is included in the multisig list
+        let mut final_admins = admins;
+        let has_admin = final_admins.iter().any(|a| a == admin);
+        if !has_admin {
+            final_admins.push_back(admin);
+        }
+
+        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+    }
+
+    /// Multi-sig pause: requires `threshold` unique admin signatures.
+    /// Each admin calls this once; the contract tracks unique signers.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is already paused");
+        }
+
+        // Dedup: only count each signer once
+        let signer_key = DataKey::PauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised pause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &true);
+            // Reset signer tracking for next pause cycle
+            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("lending"), symbol_short!("paused")),
+                (),
+            );
+        }
+    }
+
+    /// Multi-sig unpause: requires `threshold` unique admin signatures.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised unpause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &false);
+            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("lending"), symbol_short!("unpaused")),
+                (),
+            );
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn get_multisig_admins(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_multisig_threshold(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigThreshold)
+            .unwrap_or(1)
+    }
+
+    pub fn get_pause_signer_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0)
+    }
+
     /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
-    /// Once set, this is the ONLY address that may call `whitelist_asset` /
-    /// `set_flash_loan_fee_bps` / `set_governance` — the plain admin key loses
-    /// direct access to these permanently. There is no unset/reset path other
-    /// than the multisig's own internal signer governance.
     pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
@@ -145,6 +339,9 @@ impl LendingContract {
             panic!("Multisig admin already configured");
         }
         env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        let mut msig_admins = Vec::new(&env);
+        msig_admins.push_back(multisig);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
     }
 
     pub fn get_multisig_admin(env: Env) -> Address {
@@ -221,6 +418,24 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::PlatformFeeBps, &new_fee_bps);
+    }
+
+    pub fn get_uncollected_fees(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::UncollectedFees).unwrap_or(0)
+    }
+
+    pub fn collect_fees(env: Env, caller: Address, treasury_address: Address) -> i128 {
+        caller.require_auth();
+        let uncollected: i128 = Self::get_uncollected_fees(env.clone());
+        if uncollected <= 0 {
+            return 0;
+        }
+        env.storage().instance().set(&DataKey::UncollectedFees, &0i128);
+        env.events().publish(
+            (symbol_short!("fees"), symbol_short!("collected")),
+            (treasury_address, uncollected),
+        );
+        uncollected
     }
 
     // ── Flash loans ──────────────────────────────────────────────────────────
@@ -316,6 +531,7 @@ impl LendingContract {
         request: LoanRequestInput,
     ) -> u32 {
         borrower.require_auth();
+        Self::assert_not_paused(&env);
 
         let LoanRequestInput {
             amount,
@@ -387,10 +603,16 @@ impl LendingContract {
             platform_fee,
             collateral_asset,
             collateral_amount,
+            rate_model,
+            base_rate_bps: interest_rate_bps,
+            last_rate_update: now,
         };
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
         env.storage().instance().set(&DataKey::LoanCount, &loan_id);
+
+        let current_fees: i128 = env.storage().instance().get(&DataKey::UncollectedFees).unwrap_or(0);
+        env.storage().instance().set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
 
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
@@ -419,6 +641,7 @@ impl LendingContract {
         escrow_id: u32,
     ) {
         lender.require_auth();
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Pending {
@@ -464,6 +687,7 @@ impl LendingContract {
     pub fn activate_loan(env: Env, caller: Address, loan_id: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Approved {
@@ -534,6 +758,7 @@ impl LendingContract {
     pub fn mark_defaulted(env: Env, caller: Address, loan_id: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Active {
@@ -544,6 +769,120 @@ impl LendingContract {
 
         env.events()
             .publish((symbol_short!("loan"), symbol_short!("default")), loan_id);
+    }
+
+    // ── Rate model switching ─────────────────────────────────────────────────
+
+    /// Borrower switches their loan between Fixed and Floating rate models.
+    /// Charges a 0.5% fee on remaining debt and enforces a 24h cooldown.
+    pub fn switch_rate_model(env: Env, borrower: Address, loan_id: u32) {
+        borrower.require_auth();
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.borrower != borrower {
+            panic!("Caller is not the borrower");
+        }
+        if loan.status != LoanStatus::Active {
+            panic!("Can only switch rate model on ACTIVE loans");
+        }
+
+        // Enforce cooldown
+        let now = env.ledger().timestamp();
+        let last_switch: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RateSwitchCooldown(loan_id))
+            .unwrap_or(0);
+        if last_switch > 0 && (now - last_switch) < RATE_SWITCH_COOLDOWN_SECS {
+            panic!("Rate switch cooldown not elapsed (24h required)");
+        }
+
+        // Charge switch fee: 0.5% of remaining debt
+        let fee = loan
+            .remaining_due
+            .checked_mul(RATE_SWITCH_FEE_BPS as i128)
+            .expect("Overflow computing switch fee")
+            / 10_000;
+        loan.remaining_due = loan
+            .remaining_due
+            .checked_add(fee)
+            .expect("Overflow adding switch fee");
+        loan.total_due = loan
+            .total_due
+            .checked_add(fee)
+            .expect("Overflow adding switch fee to total");
+
+        // Toggle model
+        loan.rate_model = match loan.rate_model {
+            InterestRateModel::Fixed => InterestRateModel::Floating,
+            InterestRateModel::Floating => InterestRateModel::Fixed,
+        };
+        loan.last_rate_update = now;
+
+        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RateSwitchCooldown(loan_id), &now);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("rswitch")),
+            (loan_id, loan.rate_model, fee),
+        );
+    }
+
+    /// Admin updates the floating rate for a loan (called on state-changing interactions).
+    /// Only applies to Floating-rate loans. Recalculates remaining interest.
+    pub fn update_floating_rate(
+        env: Env,
+        caller: Address,
+        loan_id: u32,
+        new_rate_bps: u32,
+    ) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.rate_model != InterestRateModel::Floating {
+            panic!("Loan is not using floating rate model");
+        }
+        if loan.status != LoanStatus::Active {
+            panic!("Can only update rate on ACTIVE loans");
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Compute remaining days
+        let remaining_secs = if loan.due_at > now { loan.due_at - now } else { 0 };
+        let remaining_days = (remaining_secs / 86_400) as u32;
+
+        // Recalculate: amount already paid stays, recompute interest on remaining principal
+        let paid_so_far = loan.total_due - loan.remaining_due;
+        let remaining_principal = if loan.remaining_due > 0 {
+            // Approximate remaining principal from remaining_due and old rate
+            loan.amount
+        } else {
+            0
+        };
+
+        let new_interest =
+            Self::calculate_interest(remaining_principal, new_rate_bps, remaining_days);
+        let new_total_due = loan
+            .amount
+            .checked_add(new_interest)
+            .expect("Overflow recomputing total_due");
+        loan.total_due = new_total_due;
+        loan.remaining_due = new_total_due
+            .checked_sub(paid_so_far)
+            .expect("Underflow computing new remaining_due");
+        loan.interest_rate_bps = new_rate_bps;
+        loan.last_rate_update = now;
+
+        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("ratechg")),
+            (loan_id, new_rate_bps, loan.remaining_due),
+        );
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -695,6 +1034,15 @@ impl LendingContract {
     }
 
     fn assert_admin(env: &Env, caller: &Address) {
+        // Check multisig admins first, then fall back to single admin
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if !multisig_admins.is_empty() && multisig_admins.iter().any(|a| a == *caller) {
+            return;
+        }
         let admin: Address = env
             .storage()
             .instance()
@@ -706,13 +1054,27 @@ impl LendingContract {
     }
 
     fn assert_multisig_admin(env: &Env, caller: &Address) {
-        let multisig: Address = env
+        let multisig_admins: Vec<Address> = env
             .storage()
             .instance()
-            .get(&DataKey::MultiSigAdmin)
-            .expect("Multisig admin not configured");
-        if *caller != multisig {
-            panic!("Unauthorised: caller is not the multisig admin");
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if multisig_admins.is_empty() {
+            panic!("Multisig not configured");
+        }
+        if !multisig_admins.iter().any(|a| a == *caller) {
+            panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    fn assert_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
         }
     }
 }

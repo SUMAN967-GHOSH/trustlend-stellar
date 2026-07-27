@@ -26,6 +26,11 @@ const WALLET_OPTIONS: Array<{
     title: "Albedo",
     description: "Connect and sign through Albedo as an alternative Stellar wallet flow.",
   },
+  {
+    provider: "walletconnect",
+    title: "WalletConnect",
+    description: "Connect using LOBSTR, Scopuly, or any other WalletConnect v2 compatible mobile wallet.",
+  },
 ];
 
 export function WalletSelectionModal({
