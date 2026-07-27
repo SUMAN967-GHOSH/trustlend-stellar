@@ -49,6 +49,7 @@ pub enum DataKey {
     InsuranceEvent(u32),
     InsuranceEventCount,
     Admin,
+    MultiSigAdmin,
     MultisigAdmins,
     MultisigThreshold,
     IsPaused,

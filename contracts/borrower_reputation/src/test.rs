@@ -145,10 +145,11 @@ fn setup_with_oracle() -> (Env, Address, Address, Address, Address) {
     let borrower = Address::generate(&env);
 
     client.initialize(&admin);
-    // `set_oracle` is multisig-gated (see the `multisig_admin` crate); `admin`
-    // stands in as its own "multisig" here since this suite is testing oracle
-    // ingestion, not the multisig approval flow itself.
-    client.set_multisig_admin(&admin, &admin);
+    // `set_oracle` is multisig-gated via `assert_multisig_admin`, which checks
+    // the `MultisigAdmins` Vec. We configure a single-admin multisig so the
+    // guard passes; this suite focuses on oracle ingestion, not multisig flow.
+    let admins = soroban_sdk::vec![&env, admin.clone()];
+    client.setup_multisig(&admin, &admins, &1);
     client.set_oracle(&admin, &oracle);
     client.init_borrower(&borrower);
 

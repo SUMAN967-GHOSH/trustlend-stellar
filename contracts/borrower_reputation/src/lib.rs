@@ -81,6 +81,7 @@ pub enum DataKey {
     Oracle,
     /// Stores the latest OracleCreditData for a borrower
     OracleData(Address),
+    MultiSigAdmin,
     MultisigAdmins,
     MultisigThreshold,
     IsPaused,
