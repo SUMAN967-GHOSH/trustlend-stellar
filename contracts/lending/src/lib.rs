@@ -1,8 +1,9 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
+use soroban_sdk::token;
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Vec,
 };
-use soroban_sdk::token;
 
 #[contractclient(name = "FlashLoanReceiverClient")]
 pub trait FlashLoanReceiver {
@@ -169,7 +170,9 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
         // Whitelist XLM as default collateral asset (using dummy address for now)
         // In real implementation, we'd use the native asset identifier
-        env.storage().instance().set(&DataKey::WhitelistedAsset(admin.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::WhitelistedAsset(admin.clone()), &true);
     }
 
     /// Upgrade the contract's code while preserving its storage.
@@ -200,11 +203,19 @@ impl LendingContract {
             final_admins.push_back(admin);
         }
 
-        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
-        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigThreshold, &threshold);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &final_admins);
         env.storage().instance().set(&DataKey::IsPaused, &false);
-        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
-        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &0u32);
     }
 
     /// Multi-sig pause: requires `threshold` unique admin signatures.
@@ -243,11 +254,11 @@ impl LendingContract {
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
             // Reset signer tracking for next pause cycle
-            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
-            env.events().publish(
-                (symbol_short!("lending"), symbol_short!("paused")),
-                (),
-            );
+            env.storage()
+                .instance()
+                .set(&DataKey::PauseSignerCount, &0u32);
+            env.events()
+                .publish((symbol_short!("lending"), symbol_short!("paused")), ());
         }
     }
 
@@ -284,11 +295,11 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &false);
-            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
-            env.events().publish(
-                (symbol_short!("lending"), symbol_short!("unpaused")),
-                (),
-            );
+            env.storage()
+                .instance()
+                .set(&DataKey::UnpauseSignerCount, &0u32);
+            env.events()
+                .publish((symbol_short!("lending"), symbol_short!("unpaused")), ());
         }
     }
 
@@ -327,10 +338,14 @@ impl LendingContract {
         if env.storage().instance().has(&DataKey::MultiSigAdmin) {
             panic!("Multisig admin already configured");
         }
-        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigAdmin, &multisig);
         let mut msig_admins = Vec::new(&env);
         msig_admins.push_back(multisig);
-        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &msig_admins);
     }
 
     pub fn get_multisig_admin(env: Env) -> Address {
@@ -345,12 +360,16 @@ impl LendingContract {
     pub fn whitelist_asset(env: Env, caller: Address, asset: Address) {
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
-        env.storage().instance().set(&DataKey::WhitelistedAsset(asset), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::WhitelistedAsset(asset), &true);
     }
 
     /// Check if an asset is whitelisted
     pub fn is_asset_whitelisted(env: Env, asset: Address) -> bool {
-        env.storage().instance().has(&DataKey::WhitelistedAsset(asset))
+        env.storage()
+            .instance()
+            .has(&DataKey::WhitelistedAsset(asset))
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -368,7 +387,9 @@ impl LendingContract {
     pub fn set_governance(env: Env, caller: Address, governance: Address) {
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
-        env.storage().instance().set(&DataKey::Governance, &governance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Governance, &governance);
     }
 
     pub fn get_governance(env: Env) -> Address {
@@ -541,7 +562,11 @@ impl LendingContract {
             panic!("Collateral amount must be positive");
         }
         // Check if asset is whitelisted
-        if !env.storage().instance().has(&DataKey::WhitelistedAsset(collateral_asset.clone())) {
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::WhitelistedAsset(collateral_asset.clone()))
+        {
             panic!("Collateral asset is not whitelisted");
         }
 
@@ -594,7 +619,9 @@ impl LendingContract {
             last_rate_update: now,
         };
 
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
         env.storage().instance().set(&DataKey::LoanCount, &loan_id);
 
         let current_fees: i128 = env.storage().instance().get(&DataKey::UncollectedFees).unwrap_or(0);
@@ -620,12 +647,7 @@ impl LendingContract {
     }
 
     /// Lender approves a pending loan.
-    pub fn approve_loan(
-        env: Env,
-        lender: Address,
-        loan_id: u32,
-        escrow_id: u32,
-    ) {
+    pub fn approve_loan(env: Env, lender: Address, loan_id: u32, escrow_id: u32) {
         lender.require_auth();
         Self::assert_not_paused(&env);
 
@@ -638,7 +660,9 @@ impl LendingContract {
         loan.escrow_id = escrow_id;
         loan.status = LoanStatus::Approved;
 
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
         Self::push_loan_id_for_lender(&env, &lender, loan_id);
 
         env.events().publish(
@@ -663,7 +687,9 @@ impl LendingContract {
         loan.status = LoanStatus::Pending;
         loan.lender = env.current_contract_address();
         loan.escrow_id = 0;
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
 
         env.events()
             .publish((symbol_short!("loan"), symbol_short!("revoked")), loan_id);
@@ -680,7 +706,9 @@ impl LendingContract {
             panic!("Loan must be APPROVED before activation");
         }
         loan.status = LoanStatus::Active;
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
 
         env.events()
             .publish((symbol_short!("loan"), symbol_short!("active")), loan_id);
@@ -688,12 +716,7 @@ impl LendingContract {
 
     /// Record a repayment (partial or full).
     /// Actual XLM moves via PAYMENT op; admin calls this after Horizon confirm.
-    pub fn record_payment(
-        env: Env,
-        caller: Address,
-        loan_id: u32,
-        amount: i128,
-    ) -> LoanStatus {
+    pub fn record_payment(env: Env, caller: Address, loan_id: u32, amount: i128) -> LoanStatus {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
 
@@ -732,7 +755,9 @@ impl LendingContract {
             loan.remaining_due -= amount;
         }
 
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("payment")),
             (loan_id, amount, loan.remaining_due, loan.status.clone()),
@@ -751,7 +776,9 @@ impl LendingContract {
             panic!("Only ACTIVE loans can be defaulted");
         }
         loan.status = LoanStatus::Defaulted;
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
 
         env.events()
             .publish((symbol_short!("loan"), symbol_short!("default")), loan_id);
@@ -805,7 +832,9 @@ impl LendingContract {
         };
         loan.last_rate_update = now;
 
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
         env.storage()
             .persistent()
             .set(&DataKey::RateSwitchCooldown(loan_id), &now);
@@ -818,12 +847,7 @@ impl LendingContract {
 
     /// Admin updates the floating rate for a loan (called on state-changing interactions).
     /// Only applies to Floating-rate loans. Recalculates remaining interest.
-    pub fn update_floating_rate(
-        env: Env,
-        caller: Address,
-        loan_id: u32,
-        new_rate_bps: u32,
-    ) {
+    pub fn update_floating_rate(env: Env, caller: Address, loan_id: u32, new_rate_bps: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
 
@@ -838,7 +862,7 @@ impl LendingContract {
         let now = env.ledger().timestamp();
 
         // Compute remaining days
-        let remaining_secs = if loan.due_at > now { loan.due_at - now } else { 0 };
+        let remaining_secs = loan.due_at.saturating_sub(now);
         let remaining_days = (remaining_secs / 86_400) as u32;
 
         // Recalculate: amount already paid stays, recompute interest on remaining principal
@@ -863,7 +887,9 @@ impl LendingContract {
         loan.interest_rate_bps = new_rate_bps;
         loan.last_rate_update = now;
 
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("ratechg")),
@@ -969,14 +995,22 @@ impl LendingContract {
 
     fn push_loan_id_for_borrower(env: &Env, borrower: &Address, loan_id: u32) {
         let key = DataKey::BorrowerLoans(borrower.clone());
-        let mut ids: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut ids: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
         ids.push_back(loan_id);
         env.storage().persistent().set(&key, &ids);
     }
 
     fn push_loan_id_for_lender(env: &Env, lender: &Address, loan_id: u32) {
         let key = DataKey::LenderLoans(lender.clone());
-        let mut ids: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut ids: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
         ids.push_back(loan_id);
         env.storage().persistent().set(&key, &ids);
     }
