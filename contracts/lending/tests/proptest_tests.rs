@@ -96,12 +96,14 @@ proptest! {
 
     #[test]
     fn prop_interest_positive(
-        principal in arb_principal(),
+        principal in 3_650_000i128..=100_000_000_000i128,
         rate_bps in arb_rate_bps(),
         days in arb_days(),
     ) {
+        // Constrained so that principal * rate_bps * days >= 3_650_000,
+        // guaranteeing interest > 0 under integer division.
         let interest = calculate_interest(principal, rate_bps, days).unwrap();
-        prop_assert!(interest > 0, "interest must be > 0 for positive inputs");
+        prop_assert!(interest > 0, "interest must be > 0 for sufficiently large inputs");
     }
 
     #[test]

@@ -125,6 +125,9 @@ fn inv_fee_6_flash_loan_fee_over_max_rejected() {
 }
 
 /// INV-FEE-7: Default platform fee is 100 bps (1% of interest).
+///
+/// Regression guard: ensures the proof-file constant matches the contract
+/// (`contracts/lending/src/lib.rs` `DEFAULT_PLATFORM_FEE_BPS`).
 #[cfg(kani)]
 #[kani::proof]
 fn inv_fee_7_default_platform_fee() {
@@ -135,6 +138,9 @@ fn inv_fee_7_default_platform_fee() {
 }
 
 /// INV-FEE-8: Default flash loan fee is 9 bps (0.09% of amount).
+///
+/// Regression guard: ensures the proof-file constant matches the contract
+/// (`contracts/lending/src/lib.rs` `DEFAULT_FLASH_LOAN_FEE_BPS`).
 #[cfg(kani)]
 #[kani::proof]
 fn inv_fee_8_default_flash_loan_fee() {

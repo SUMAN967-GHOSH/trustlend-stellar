@@ -83,9 +83,9 @@ fn inv_fl_2_fee_le_amount() {
     }
 }
 
-/// INV-FL-3: Successful flash loan increases pool by at least the fee.
+/// INV-FL-3: Successful flash loan increases pool by exactly the fee.
 ///
-/// `pool_after >= pool_before + fee`
+/// `pool_after == pool_before + fee` (receiver repaid principal + fee)
 #[cfg(kani)]
 #[kani::proof]
 fn inv_fl_3_successful_loan_increases_pool() {
@@ -99,9 +99,10 @@ fn inv_fl_3_successful_loan_increases_pool() {
     kani::assume(pool_balance >= amount); // pool has enough
 
     if let Some((pool_after, fee)) = simulate_flash_loan_success(pool_balance, amount, fee_bps) {
-        assert!(
-            pool_after >= pool_balance + fee,
-            "Pool must increase by at least the fee"
+        assert_eq!(
+            pool_after,
+            pool_balance + fee,
+            "Pool must increase by exactly the fee"
         );
     }
 }

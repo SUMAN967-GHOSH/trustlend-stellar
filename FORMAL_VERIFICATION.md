@@ -109,7 +109,7 @@ Formal verification was added to:
 |---|---|
 | INV-MATH-1 | Interest formula does not overflow for bounded inputs |
 | INV-MATH-2 | Interest is non-negative for positive inputs |
-| INV-MATH-3 | Interest is strictly positive for non-zero inputs |
+| INV-MATH-3 | Interest is strictly positive for inputs with `principal × rate_bps × days >= 3_650_000` |
 | INV-MATH-4 | Interest is monotonically non-decreasing in principal |
 | INV-MATH-5 | Interest is monotonically non-decreasing in rate |
 | INV-MATH-6 | Interest is monotonically non-decreasing in days |
@@ -207,5 +207,5 @@ contracts/lending/
   Cargo.toml            # Added proptest dev-dependency
 .github/workflows/
   formal-verification.yml   # CI workflow
-  FORMAL_VERIFICATION.md    # This file (in repo root)
+FORMAL_VERIFICATION.md       # This file (in repo root)
 ```

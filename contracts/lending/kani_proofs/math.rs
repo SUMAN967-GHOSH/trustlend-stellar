@@ -86,7 +86,7 @@ fn calculate_rate_switch_fee(remaining_due: i128) -> Option<i128> {
 /// - Duration: up to 365 days
 ///
 /// The maximum intermediate value is:
-/// `100_000_000_000 × 1500 × 365 = 5.475 × 10^16`
+/// `1_000_000_000_000 × 1500 × 365 = 5.475 × 10^17`
 /// which is well within i128::MAX (~1.7 × 10^38).
 #[cfg(kani)]
 #[kani::proof]
@@ -95,7 +95,7 @@ fn inv_math_1_interest_no_overflow_bounded() {
     let rate_bps: u32 = kani::any();
     let days: u32 = kani::any();
 
-    kani::assume(principal >= 0 && principal <= 100_000_000_000);
+    kani::assume(principal >= 0 && principal <= 1_000_000_000_000);
     kani::assume(rate_bps >= 1 && rate_bps <= 1500);
     kani::assume(days >= 1 && days <= 365);
 
@@ -122,7 +122,11 @@ fn inv_math_2_interest_non_negative() {
     assert!(interest >= 0, "Interest must be non-negative");
 }
 
-/// INV-MATH-3: Interest is strictly positive for non-zero inputs.
+/// INV-MATH-3: Interest is strictly positive when inputs are large enough.
+///
+/// Because the formula uses integer division, small inputs can truncate to
+/// zero. This proof constrains `principal * rate_bps * days >= 3_650_000`
+/// to guarantee strictly positive interest.
 #[cfg(kani)]
 #[kani::proof]
 fn inv_math_3_interest_positive_for_nonzero() {
@@ -133,11 +137,12 @@ fn inv_math_3_interest_positive_for_nonzero() {
     kani::assume(principal > 0 && principal <= 100_000_000_000);
     kani::assume(rate_bps >= 1 && rate_bps <= 1500);
     kani::assume(days >= 1 && days <= 365);
+    kani::assume(principal * rate_bps as i128 * days as i128 >= 3_650_000);
 
     let interest = calculate_interest(principal, rate_bps, days).unwrap();
     assert!(
         interest > 0,
-        "Interest must be positive for positive inputs"
+        "Interest must be positive when inputs are large enough"
     );
 }
 

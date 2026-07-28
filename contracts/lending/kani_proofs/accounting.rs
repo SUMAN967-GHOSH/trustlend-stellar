@@ -299,12 +299,10 @@ fn inv_acct_8_fee_accumulation() {
 
     if let Some((_loan1, fee1)) = create_loan(p1, rate_bps, days, fee_bps) {
         if let Some((_loan2, fee2)) = create_loan(p2, rate_bps, days, fee_bps) {
-            let total_fees = fee1 + fee2;
-            assert!(total_fees >= 0, "Accumulated fees must be non-negative");
-            assert!(
-                total_fees <= fee1 + fee2 + 1, // trivially true, but validates arithmetic
-                "Fee accumulation arithmetic must be consistent"
-            );
+            let total_fees = fee1.checked_add(fee2);
+            assert!(total_fees.is_some(), "Fee accumulation must not overflow");
+            assert!(fee1 >= 0, "Individual fees must be non-negative");
+            assert!(fee2 >= 0, "Individual fees must be non-negative");
         }
     }
 }

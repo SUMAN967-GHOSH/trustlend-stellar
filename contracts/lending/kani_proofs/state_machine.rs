@@ -136,23 +136,24 @@ fn inv_sm_6_cancelled_is_terminal() {
 }
 
 /// INV-SM-7: Paused contracts block Approve, Activate, Default, and SwitchRate.
+///
+/// Verified by enumerating every action independently and checking the expected
+/// blocked/unblocked status, rather than re-checking the classification
+/// produced by `action_blocked_when_paused`.
 #[cfg(kani)]
 #[kani::proof]
 fn inv_sm_7_paused_blocks_actions() {
-    let action: Action = kani::any();
-    let paused = action_blocked_when_paused(action);
+    // Blocked actions (cannot proceed when paused)
+    assert!(action_blocked_when_paused(Action::Approve));
+    assert!(action_blocked_when_paused(Action::Activate));
+    assert!(action_blocked_when_paused(Action::Default));
+    assert!(action_blocked_when_paused(Action::SwitchRate));
 
-    if paused {
-        // These actions must not succeed when paused (enforced at the caller level).
-        // We verify the flag is set correctly.
-        assert!(
-            matches!(
-                action,
-                Action::Approve | Action::Activate | Action::Default | Action::SwitchRate
-            ),
-            "Blocked actions must be state-changing operations"
-        );
-    }
+    // Allowed actions (can proceed when paused)
+    assert!(!action_blocked_when_paused(Action::Cancel));
+    assert!(!action_blocked_when_paused(Action::Revoke));
+    assert!(!action_blocked_when_paused(Action::RecordPayment));
+    assert!(!action_blocked_when_paused(Action::FullPayment));
 }
 
 /// INV-SM-8: RecordPayment is NOT blocked when paused (allowed per contract).
@@ -182,27 +183,32 @@ fn inv_sm_9_no_transition_from_terminal() {
     assert_eq!(cancelled, None, "No transition from Cancelled");
 }
 
-/// INV-SM-10: Total number of reachable states is exactly 6.
+/// INV-SM-10: Exactly 6 states are reachable from Pending.
 ///
-/// This is a structural invariant: the state machine has a fixed, finite set
-/// of states and we enumerate them all.
+/// Enumerates reachable states by traversing valid transitions from Pending.
+/// This is a symbolic reachability check within the proof's transition model.
 #[cfg(kani)]
 #[kani::proof]
-fn inv_sm_10_finite_states() {
-    let all_states = [
-        LoanStatus::Pending,
-        LoanStatus::Approved,
-        LoanStatus::Active,
-        LoanStatus::Repaid,
-        LoanStatus::Defaulted,
-        LoanStatus::Cancelled,
-    ];
+fn inv_sm_10_reachable_states() {
+    // Direct transitions from Pending
+    let approved = transition(LoanStatus::Pending, Action::Approve);
+    let cancelled = transition(LoanStatus::Pending, Action::Cancel);
 
-    // Count unique reachable states from Pending via any path
-    // This is a structural check, not an exhaustive path search.
-    assert_eq!(
-        all_states.len(),
-        6,
-        "State machine must have exactly 6 states"
-    );
+    // From Approved
+    let active = approved.and_then(|s| transition(s, Action::Activate));
+    let back_to_pending = approved.and_then(|s| transition(s, Action::Revoke));
+
+    // From Active
+    let repaid = active.and_then(|s| transition(s, Action::FullPayment));
+    let defaulted = active.and_then(|s| transition(s, Action::Default));
+
+    // All six distinct states are reachable
+    assert_eq!(approved, Some(LoanStatus::Approved));
+    assert_eq!(cancelled, Some(LoanStatus::Cancelled));
+    assert_eq!(active, Some(LoanStatus::Active));
+    assert_eq!(repaid, Some(LoanStatus::Repaid));
+    assert_eq!(defaulted, Some(LoanStatus::Defaulted));
+
+    // Revoke cycles back to Pending
+    assert_eq!(back_to_pending, Some(LoanStatus::Pending));
 }
