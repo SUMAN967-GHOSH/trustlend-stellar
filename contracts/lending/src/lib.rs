@@ -147,6 +147,7 @@ const RATE_SWITCH_COOLDOWN_SECS: u64 = 86_400;
 #[contract]
 pub struct LendingContract;
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl LendingContract {
     // TODO (RWA Collateral Integration):
@@ -838,7 +839,7 @@ impl LendingContract {
         let now = env.ledger().timestamp();
 
         // Compute remaining days
-        let remaining_secs = if loan.due_at > now { loan.due_at - now } else { 0 };
+        let remaining_secs = loan.due_at.saturating_sub(now);
         let remaining_days = (remaining_secs / 86_400) as u32;
 
         // Recalculate: amount already paid stays, recompute interest on remaining principal
