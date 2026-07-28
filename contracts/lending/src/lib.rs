@@ -148,6 +148,7 @@ const RATE_SWITCH_COOLDOWN_SECS: u64 = 86_400;
 #[contract]
 pub struct LendingContract;
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl LendingContract {
     // TODO (RWA Collateral Integration):
