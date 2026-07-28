@@ -17,7 +17,7 @@ use proptest::prelude::*;
 /// Mirrors `LendingContract::calculate_interest`.
 /// `interest = principal × rate_bps × days / (10_000 × 365)`
 fn calculate_interest(principal: i128, rate_bps: u32, days: u32) -> Option<i128> {
-    let numerator = (principal as i128)
+    let numerator = principal
         .checked_mul(rate_bps as i128)?
         .checked_mul(days as i128)?;
     Some(numerator / (10_000_i128 * 365))
@@ -35,23 +35,17 @@ fn calculate_liquidation_threshold(score: u32, volatility: u32) -> u32 {
 
 /// Platform fee: `interest × fee_bps / 10_000`.
 fn calculate_platform_fee(interest: i128, fee_bps: u32) -> Option<i128> {
-    (interest as i128)
-        .checked_mul(fee_bps as i128)?
-        .checked_div(10_000)
+    interest.checked_mul(fee_bps as i128)?.checked_div(10_000)
 }
 
 /// Flash loan fee: `amount × fee_bps / 10_000`.
 fn calculate_flash_loan_fee(amount: i128, fee_bps: u32) -> Option<i128> {
-    (amount as i128)
-        .checked_mul(fee_bps as i128)?
-        .checked_div(10_000)
+    amount.checked_mul(fee_bps as i128)?.checked_div(10_000)
 }
 
 /// Rate switch fee: `remaining_due × 50 / 10_000`.
 fn calculate_rate_switch_fee(remaining_due: i128) -> Option<i128> {
-    (remaining_due as i128)
-        .checked_mul(50_i128)?
-        .checked_div(10_000)
+    remaining_due.checked_mul(50_i128)?.checked_div(10_000)
 }
 
 // ─── Strategies ──────────────────────────────────────────────────────────────
