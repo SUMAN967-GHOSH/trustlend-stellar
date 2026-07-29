@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   DollarSign,
 } from "lucide-react";
+import { TreasuryDashboardSkeleton } from "@/components/dashboard/ChartSkeleton";
 
 interface HistoryRecord {
   id: number;
@@ -84,13 +85,9 @@ export function TreasuryDashboard() {
     }
   };
 
+  // ── Loading state: show full-page skeleton ─────────────────────────────────
   if (loading && !data) {
-    return (
-      <div className="flex items-center justify-center p-12 text-slate-400">
-        <RefreshCw className="w-6 h-6 animate-spin mr-2" />
-        Loading Protocol Treasury Metrics...
-      </div>
-    );
+    return <TreasuryDashboardSkeleton />;
   }
 
   const currentBalance = data?.currentBalance ?? 0;
