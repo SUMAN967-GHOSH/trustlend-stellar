@@ -1620,6 +1620,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tlend_airdrop"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+ "tlend_token",
+]
+
+[[package]]
+name = "tlend_token"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "tlend_vesting"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+ "tlend_token",
+]
+
+[[package]]
 name = "treasury"
 version = "0.1.0"
 dependencies = [

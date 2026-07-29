@@ -9,6 +9,9 @@ members = [
     "multisig_admin",
     "auto_compound_vault",
     "treasury",
+    "tlend_token",
+    "tlend_vesting",
+    "tlend_airdrop",
 ]
 resolver = "2"
 
