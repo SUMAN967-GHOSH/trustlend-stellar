@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { getDashboardPath, normalizeUserRole } from "@/lib/auth/roles";
+import { recordRequestMetrics } from "@/lib/monitoring/metrics";
 
 // ── In-memory rate limiter (resets on server restart) ─────────────────────────
 // For production, replace with Redis/Upstash for persistence across instances.
@@ -23,6 +24,8 @@ function getRateLimitKey(request: NextRequest): string {
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const method = request.method;
+  const start = performance.now();
 
   // ── ① Short-circuit for static assets — no auth check needed ────────────────
   const isStatic =
@@ -46,6 +49,8 @@ export async function proxy(request: NextRequest) {
     } else {
       record.count++;
       if (record.count > MAX_REQUESTS) {
+        const duration = (performance.now() - start) / 1000;
+        recordRequestMetrics(method, pathname, 429, duration);
         return NextResponse.json(
           { error: "Too many requests, please slow down." },
           {
@@ -102,6 +107,8 @@ export async function proxy(request: NextRequest) {
   const isAuthEntryPath = pathname === "/auth";
 
   if (isDashboardPath && !effectiveUser) {
+    const duration = (performance.now() - start) / 1000;
+    recordRequestMetrics(method, pathname, 302, duration);
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/auth";
     redirectUrl.search = "";
@@ -109,6 +116,8 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthEntryPath && effectiveUser) {
+    const duration = (performance.now() - start) / 1000;
+    recordRequestMetrics(method, pathname, 302, duration);
     const redirectUrl = request.nextUrl.clone();
     const role = normalizeUserRole(effectiveUser.user_metadata?.account_type);
     redirectUrl.pathname = getDashboardPath(role);
