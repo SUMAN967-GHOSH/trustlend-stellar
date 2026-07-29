@@ -6,9 +6,11 @@ import { recordRequestMetrics } from "@/lib/monitoring/metrics";
 // ── In-memory rate limiter (resets on server restart) ─────────────────────────
 // For production, replace with Redis/Upstash for persistence across instances.
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
-const WINDOW_MS = 60_000;   // 1-minute window
-const MAX_REQUESTS = 30;     // 30 API requests per IP per minute
-// SECURITY: bypass is disabled in production regardless of env var
+const WINDOW_MS = 60_000;       // 1-minute window
+const MAX_REQUESTS = 100;       // Safety-net: 100 API requests per IP per minute
+                                 // Note: per-route granular limits in lib/rate-limit.ts are
+                                 // the primary control. This is a hard ceiling against
+                                 // brute-force attacks and misconfigured clients.
 const DEV_BYPASS_ENABLED =
   process.env.NODE_ENV !== "production" &&
   process.env.ENABLE_DEV_AUTH_BYPASS === "true";
