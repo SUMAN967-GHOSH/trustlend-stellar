@@ -1,0 +1,126 @@
+version: "3.8"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TrustLend — SubQuery Soroban Indexer Docker Compose
+# ──────────────────────────────────────────────────────────────────────────────
+# Spins up three services:
+#   1. postgres     — Persistent store for indexed chain data
+#   2. subquery-node — SubQuery Soroban indexer (listens to Stellar events)
+#   3. graphql-engine — GraphQL API over the indexed data
+#
+# Usage:
+#   docker compose -f docker-compose.subquery.yml up -d
+#
+# The GraphQL playground is available at http://localhost:3001/graphql
+# after the indexer finishes its initial sync.
+#
+# Environment variables (create a .env.subquery file or export):
+#   SUBQUERY_DB_PASSWORD   — PostgreSQL password (default: postgres)
+#   SUBQUERY_DB_USER       — PostgreSQL user     (default: postgres)
+#   SUBQUERY_DB_NAME       — PostgreSQL database  (default: subquery)
+#   SUBQUERY_NETWORK_ENDPOINT — Soroban RPC endpoint (default: testnet)
+#   SUBQUERY_START_BLOCK   — Start block height   (default: 12345678)
+#   SUBQUERY_BATCH_SIZE    — Batch size for fetching (default: 100)
+# ──────────────────────────────────────────────────────────────────────────────
+
+x-env-defaults: &env-defaults
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: ${SUBQUERY_DB_USER:-postgres}
+  DB_PASS: ${SUBQUERY_DB_PASSWORD:-postgres}
+  DB_DATABASE: ${SUBQUERY_DB_NAME:-subquery}
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: trustlend-subquery-db
+    restart: unless-stopped
+    ports:
+      # Host port 5433 avoids conflict with any local PostgreSQL on 5432.
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_PASSWORD: ${SUBQUERY_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${SUBQUERY_DB_NAME:-subquery}
+    volumes:
+      - subquery-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SUBQUERY_DB_USER:-postgres} -d ${SUBQUERY_DB_NAME:-subquery}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── SubQuery Node (Indexer) ───────────────────────────────────────────────
+  subquery-node:
+    build:
+      context: .
+      dockerfile: subquery/Dockerfile
+    container_name: trustlend-subquery-node
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *env-defaults
+      DB_SCHEMA: trustlend
+      # Network configuration
+      CHAIN_ID: ${SUBQUERY_CHAIN_ID:-Test SDF Network ; September 2015}
+      NETWORK_ENDPOINT: ${SUBQUERY_NETWORK_ENDPOINT:-https://soroban-testnet.stellar.org}
+      # Optional: set a specific API key if the RPC endpoint requires one
+      # SOROBAN_RPC_API_KEY: ${SUBQUERY_RPC_API_KEY:-}
+    volumes:
+      # Mount the project root so the node can read project.yaml and schema.graphql
+      - ./project.yaml:/app/project.yaml:ro
+      - ./schema.graphql:/app/schema.graphql:ro
+      # Mount the built mappings
+      - subquery-dist:/app/dist
+    command:
+      - "-f=/app"
+      - "--db-schema=trustlend"
+      - "--db-host=postgres"
+      - "--db-port=5432"
+      - "--db-user=${SUBQUERY_DB_USER:-postgres}"
+      - "--db-pass=${SUBQUERY_DB_PASSWORD:-postgres}"
+      - "--db-database=${SUBQUERY_DB_NAME:-subquery}"
+      - "--batch-size=${SUBQUERY_BATCH_SIZE:-100}"
+      # Uncomment and set a specific start block to override project.yaml
+      # - "--start-block=${SUBQUERY_START_BLOCK:-12345678}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── GraphQL Engine (Query Service) ────────────────────────────────────────
+  graphql-engine:
+    image: onfinality/subql-query:latest
+    container_name: trustlend-subquery-graphql
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - subquery-node
+    ports:
+      - "3001:3000"
+    environment:
+      <<: *env-defaults
+      DB_SCHEMA: trustlend
+    command:
+      - "--name=trustlend"
+      - "--db-schema=trustlend"
+      - "--db-host=postgres"
+      - "--db-port=5432"
+      - "--db-user=${SUBQUERY_DB_USER:-postgres}"
+      - "--db-pass=${SUBQUERY_DB_PASSWORD:-postgres}"
+      - "--db-database=${SUBQUERY_DB_NAME:-subquery}"
+      # Enable the GraphQL playground in dev
+      - "--playground=true"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  subquery-postgres-data:
+    driver: local
+  subquery-dist:
