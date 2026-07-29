@@ -5,7 +5,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, E
 
 /// Default enforcement phases aligned to the spec.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum DefaultPhase {
     /// Days 1-7 — friendly reminders, no penalty yet
     Friendly,

@@ -5,7 +5,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, E
 
 /// Escrow hold status.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum EscrowStatus {
     Held,
     Transferred,

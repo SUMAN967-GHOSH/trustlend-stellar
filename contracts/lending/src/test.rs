@@ -53,13 +53,14 @@ fn test_create_loan_request_basic() {
 
     let loan_id = client.create_loan_request(
         &borrower,
-        &principal,
-        &days,
-        &rate_bps,
-        &max_loan,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: principal,
+            duration_days: days,
+            interest_rate_bps: rate_bps,
+            max_loan_amount: max_loan,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     assert_eq!(loan_id, 1);
 
@@ -87,15 +88,17 @@ fn test_interest_calculation_is_correct() {
     let days: u32 = 365;
     let expected_interest: i128 = principal * 1500 / 10_000; // = 1 500 XLM
 
-    let loan_id = client.create_loan_request(
+    let loan_id =
+        client.create_loan_request(
         &borrower,
-        &principal,
-        &days,
-        &rate_bps,
-        &(principal * 2),
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: principal,
+            duration_days: days,
+            interest_rate_bps: rate_bps,
+            max_loan_amount: (principal * 2),
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
 
@@ -116,13 +119,14 @@ fn test_create_loan_max_duration_365_days() {
 
     let loan_id = client.create_loan_request(
         &borrower,
-        &principal,
-        &days,
-        &rate_bps,
-        &max_loan,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: principal,
+            duration_days: days,
+            interest_rate_bps: rate_bps,
+            max_loan_amount: max_loan,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
     assert_eq!(loan.duration_days, 365);
@@ -137,13 +141,14 @@ fn test_create_loan_min_duration_1_day() {
 
     let loan_id = client.create_loan_request(
         &borrower,
-        &1_000_0000000,
-        &1,
-        &1500,
-        &100_000_0000000,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: 1,
+            interest_rate_bps: 1500,
+            max_loan_amount: 100_000_0000000,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
     assert_eq!(loan.duration_days, 1);
@@ -167,15 +172,17 @@ fn test_no_overflow_at_maximum_valid_inputs() {
     // Verify the multiplication fits in i128 without panicking:
     // principal × rate_bps × days = 100_000_0000000 × 1500 × 365 ≈ 5.475 × 10^19
     // i128::MAX ≈ 1.7 × 10^38 — plenty of headroom.
-    let loan_id = client.create_loan_request(
+    let loan_id =
+        client.create_loan_request(
         &borrower,
-        &principal,
-        &days,
-        &rate_bps,
-        &principal,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: principal,
+            duration_days: days,
+            interest_rate_bps: rate_bps,
+            max_loan_amount: principal,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
     assert!(loan.total_due > principal);
@@ -192,13 +199,14 @@ fn test_overflow_panics_with_near_max_principal() {
     // i128::MAX principal × any rate_bps > 1 will overflow the first checked_mul.
     client.create_loan_request(
         &borrower,
-        &I128_MAX,
-        &365,
-        &1500,
-        &I128_MAX,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: I128_MAX,
+            duration_days: 365,
+            interest_rate_bps: 1500,
+            max_loan_amount: I128_MAX,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -215,13 +223,14 @@ fn test_overflow_panics_at_second_multiplication() {
     let boundary_principal: i128 = I128_MAX / 1500;
     client.create_loan_request(
         &borrower,
-        &boundary_principal,
-        &365,
-        &1500,
-        &I128_MAX,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: boundary_principal,
+            duration_days: 365,
+            interest_rate_bps: 1500,
+            max_loan_amount: I128_MAX,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -236,13 +245,14 @@ fn test_duration_zero_is_rejected() {
 
     client.create_loan_request(
         &borrower,
-        &1_000_0000000,
-        &0,
-        &1500,
-        &100_000_0000000,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: 0,
+            interest_rate_bps: 1500,
+            max_loan_amount: 100_000_0000000,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -255,13 +265,14 @@ fn test_duration_366_is_rejected() {
 
     client.create_loan_request(
         &borrower,
-        &1_000_0000000,
-        &366,
-        &1500,
-        &100_000_0000000,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: 366,
+            interest_rate_bps: 1500,
+            max_loan_amount: 100_000_0000000,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -274,13 +285,14 @@ fn test_zero_amount_is_rejected() {
 
     client.create_loan_request(
         &borrower,
-        &0,
-        &30,
-        &1500,
-        &100_000_0000000,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: 0,
+            duration_days: 30,
+            interest_rate_bps: 1500,
+            max_loan_amount: 100_000_0000000,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -294,13 +306,14 @@ fn test_amount_over_max_is_rejected() {
     let max_loan: i128 = 1_000_0000000; // 1 000 XLM
     client.create_loan_request(
         &borrower,
-        &(max_loan + 1),
-        &30,
-        &1500,
-        &max_loan,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: (max_loan + 1),
+            duration_days: 30,
+            interest_rate_bps: 1500,
+            max_loan_amount: max_loan,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
 }
 
@@ -316,15 +329,17 @@ fn test_due_at_computed_correctly() {
     env.ledger().set_timestamp(1_000_000_000_u64);
 
     let days: u32 = 365;
-    let loan_id = client.create_loan_request(
+    let loan_id =
+        client.create_loan_request(
         &borrower,
-        &1_000_0000000,
-        &days,
-        &1500,
-        &100_000_0000000,
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: days,
+            interest_rate_bps: 1500,
+            max_loan_amount: 100_000_0000000,
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
 
@@ -344,15 +359,17 @@ fn test_platform_fee_is_one_percent_of_interest() {
     let rate_bps: u32 = 1500;
     let days: u32 = 365;
 
-    let loan_id = client.create_loan_request(
+    let loan_id =
+        client.create_loan_request(
         &borrower,
-        &principal,
-        &days,
-        &rate_bps,
-        &(principal * 2),
-        &collateral_asset,
-        &100_000_0000000,
-        &InterestRateModel::Fixed,
+        &LoanRequestInput {
+            amount: principal,
+            duration_days: days,
+            interest_rate_bps: rate_bps,
+            max_loan_amount: (principal * 2),
+            collateral_asset: collateral_asset,
+            collateral_amount: 100_000_0000000,
+        }
     );
     let loan = client.get_loan(&loan_id);
 

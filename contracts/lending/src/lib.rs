@@ -21,7 +21,8 @@ pub trait FlashLoanReceiver {
 
 /// Full lifecycle status of a loan.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum LoanStatus {
     Pending,
     Approved,
@@ -40,6 +41,17 @@ pub enum InterestRateModel {
 }
 
 /// A single loan record.
+#[contracttype]
+#[derive(Clone)]
+pub struct LoanRequestInput {
+    pub amount: i128,
+    pub duration_days: u32,
+    pub interest_rate_bps: u32,
+    pub max_loan_amount: i128,
+    pub collateral_asset: Address,
+    pub collateral_amount: i128,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub struct LoanRecord {
@@ -90,16 +102,15 @@ pub struct PaymentRecord {
 pub enum DataKey {
     Loan(u32),
     LoanCount,
-    BorrowerLoans(Address),
-    LenderLoans(Address),
-    Payment(u32, u32), // (loan_id, payment_index)
-    PaymentCount(u32), // per loan
+    BorrowerLoanCount(Address),
+    BorrowerLoanAt(Address, u32),
+    LenderLoanCount(Address),
+    LenderLoanAt(Address, u32),
+    Payment(u32, u32),
+    PaymentCount(u32),
     Admin,
-    /// Platform fee as basis-points of interest (100 = 1.00%). DAO-controlled.
     PlatformFeeBps,
-    /// Address of the Governance contract authorised to change the fee.
     Governance,
-    /// Whitelisted collateral asset
     WhitelistedAsset(Address),
     /// Link to MultiSigAdmin contract
     MultiSigAdmin,
@@ -539,16 +550,19 @@ impl LendingContract {
     pub fn create_loan_request(
         env: Env,
         borrower: Address,
-        amount: i128,
-        duration_days: u32,
-        interest_rate_bps: u32,
-        max_loan_amount: i128,
-        collateral_asset: Address,
-        collateral_amount: i128,
-        rate_model: InterestRateModel,
+        request: LoanRequestInput,
     ) -> u32 {
         borrower.require_auth();
         Self::assert_not_paused(&env);
+
+        let LoanRequestInput {
+            amount,
+            duration_days,
+            interest_rate_bps,
+            max_loan_amount,
+            collateral_asset,
+            collateral_amount,
+        } = request;
 
         if amount <= 0 {
             panic!("Loan amount must be positive");
@@ -629,7 +643,7 @@ impl LendingContract {
         env.storage().instance().set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
 
         // Track per-borrower list
-        Self::push_loan_id_for_borrower(&env, &borrower, loan_id);
+        Self::store_borrower_loan_id(&env, &borrower, loan_id);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("request")),
@@ -977,6 +991,38 @@ impl LendingContract {
             .saturating_sub(volatility_penalty);
 
         threshold.clamp(5000, 9000) as u32
+    }
+
+    /// Number of loans a borrower has created.
+    pub fn get_borrower_loan_count(env: Env, borrower: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BorrowerLoanCount(borrower))
+            .unwrap_or(0)
+    }
+
+    /// Loan ID at a given index for a borrower (0-based).
+    pub fn get_borrower_loan_at(env: Env, borrower: Address, index: u32) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BorrowerLoanAt(borrower, index))
+            .expect("Index out of bounds")
+    }
+
+    /// Number of loans a lender has approved.
+    pub fn get_lender_loan_count(env: Env, lender: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LenderLoanCount(lender))
+            .unwrap_or(0)
+    }
+
+    /// Loan ID at a given index for a lender (0-based).
+    pub fn get_lender_loan_at(env: Env, lender: Address, index: u32) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LenderLoanAt(lender, index))
+            .expect("Index out of bounds")
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
