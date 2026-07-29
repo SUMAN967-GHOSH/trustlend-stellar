@@ -99,6 +99,22 @@ export interface EscrowHold {
   status: EscrowStatus;
 }
 
+// ── Pooled Lending / JumpRateModel ────────────────────────────────────────────
+
+export interface PoolConfig {
+  baseRateBps: number;
+  multiplierPerSlopeBps: number;
+  jumpMultiplierBps: number;
+  kinkBps: number;
+  reserveFactorBps: number;
+}
+
+export interface PoolData {
+  totalSupply: bigint;
+  totalBorrows: bigint;
+  totalReserves: bigint;
+}
+
 // ── Interest Rate Model ───────────────────────────────────────────────────────
 
 /** Whether a loan uses a fixed or floating interest rate. */
