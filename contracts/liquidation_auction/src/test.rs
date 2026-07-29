@@ -120,3 +120,31 @@ fn test_expired_auction_creates_bad_debt() {
     assert_eq!(settlement.recovered_amount, 0);
     assert_eq!(settlement.bad_debt, 1_000_000);
 }
+
+#[test]
+fn test_bid_below_debt_records_insurance_claim() {
+    let (env, contract_id, admin, borrower, bidder) = setup();
+    let client = LiquidationAuctionContractClient::new(&env, &contract_id);
+
+    client.start_auction(
+        &admin,
+        &12,
+        &borrower,
+        &10_000_000,
+        &1_000_000,
+        &1_000_000,
+        &250_000,
+        &50_000,
+        &30,
+    );
+
+    // Once the Dutch price reaches the floor, the collateral may sell for less
+    // than the outstanding debt. The settlement is the amount the insurance
+    // fund must cover for this loan.
+    env.ledger().set_timestamp(START_TIMESTAMP + 20);
+    let settlement = client.place_bid(&bidder, &12, &250_000);
+
+    assert_eq!(settlement.status, AuctionStatus::Sold);
+    assert_eq!(settlement.recovered_amount, 250_000);
+    assert_eq!(settlement.bad_debt, 750_000);
+}

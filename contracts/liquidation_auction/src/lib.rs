@@ -90,6 +90,9 @@ impl LiquidationAuctionContract {
         }
 
         let started_at = env.ledger().timestamp();
+        let expires_at = started_at
+            .checked_add(duration_seconds)
+            .expect("Auction expiry timestamp overflow");
         let auction = LiquidationAuction {
             loan_id,
             borrower,
@@ -99,7 +102,7 @@ impl LiquidationAuctionContract {
             floor_price,
             decay_per_second,
             started_at,
-            expires_at: started_at + duration_seconds,
+            expires_at,
             status: AuctionStatus::Active,
             highest_bid: 0,
             recovered_amount: 0,
@@ -205,7 +208,7 @@ impl LiquidationAuctionContract {
             .set(&DataKey::Auction(loan_id), &auction);
         env.events().publish(
             (symbol_short!("auction"), symbol_short!("expire")),
-            (loan_id, settlement.bad_debt),
+            (loan_id, auction.collateral_amount, settlement.bad_debt),
         );
 
         settlement
