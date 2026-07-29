@@ -22,6 +22,7 @@
   <strong><a href="https://trustlendborrow.vercel.app/">Live Production</a></strong> |
   <strong><a href="https://youtu.be/V-SQxunQLow">Video Demo</a></strong> |
   <strong><a href="ROADMAP.md">Roadmap</a></strong> |
+  <strong><a href="GETTING_STARTED.md">Getting Started Guide</a></strong> |
   <strong><a href="CONTRIBUTING.md">Contributing Guidelines</a></strong>
 </p>
 
@@ -127,45 +128,28 @@ flowchart LR
 
 ## ⚙️ Getting Started (Local Development)
 
-### 1. Prerequisites
-- Node.js 18+
-- Rust toolchain & Stellar CLI
-- Supabase (Cloud or Local CLI)
+> 📖 **New contributors should start with the [Getting Started Guide](GETTING_STARTED.md)** for a thorough walkthrough covering Soroban CLI setup, contract compilation, database setup, and the full test suite.
 
-### 2. Installation
+### Quick Start
+
 ```bash
 git clone https://github.com/thisisouvik/trustlend-stellar.git
 cd trustlend-stellar
 npm install
-```
-
-### 3. Environment Setup
-```bash
 cp .env.example .env.local
-```
-Fill in the required values in `.env.local` (Supabase credentials, Stellar testnet settings, and Contract IDs).
-
-### 4. Database Setup
-Run the SQL scripts located in `sql/` in your Supabase SQL editor:
-1. `sql/001_schema.sql`
-2. `sql/002_rls.sql`
-3. `sql/KYC_SCHEMA.sql`
-
-*(Note: Create a private storage bucket named `kyc-documents` for user uploads and apply RLS policies.)*
-
-### 5. Run the App
-
-**Option A: Standard Local Development**
-```bash
+# Fill in your .env.local values, then:
 npm run dev
 ```
 
-**Option B: Using Docker Compose (Recommended)**
-If you have Docker installed, you can skip local Node.js installation and run:
+The app will be available at **http://localhost:3000** with hot-reloading enabled.
+
+### Docker (Alternative)
 ```bash
 docker-compose up
 ```
-The app will be available at `http://localhost:3000` with hot-reloading enabled.
+
+### Need more detail?
+See the [complete setup guide →](GETTING_STARTED.md)
 
 ---
 
