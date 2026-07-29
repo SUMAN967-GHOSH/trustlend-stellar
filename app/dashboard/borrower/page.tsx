@@ -11,6 +11,7 @@ import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } 
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
+import { formatCurrency } from "@/lib/utils/formatting";
 
 // ── Inline SVG illustrations ───────────────────────────────────────────────
 function EmptyLoansIllustration() {
@@ -250,7 +251,7 @@ export default async function BorrowerDashboardPage() {
                     return (
                       <tr key={loanId} style={{ borderBottom: "1px solid #f9fafb" }}>
                         <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>{loanId.slice(0, 8)}</td>
-                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>
+                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>{formatCurrency(Number(loan.principal_amount))}</td>
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
                           </td>

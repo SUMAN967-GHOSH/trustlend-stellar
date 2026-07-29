@@ -8,6 +8,7 @@ import {
   approveLoan,
   runAutoMatch,
 } from "@/app/actions/admin-pools";
+import { formatCurrency } from "@/lib/utils/formatting";
 
 interface Pool {
   id: string;
@@ -184,8 +185,8 @@ function PoolRow({ pool, onChanged }: { pool: Pool; onChanged: () => void }) {
         </span>
       </td>
       <td>{(pool.apr_bps / 100).toFixed(2)}%</td>
-      <td>{Number(pool.total_liquidity).toFixed(2)} XLM</td>
-      <td>{Number(pool.available_liquidity).toFixed(2)} XLM</td>
+      <td>{formatCurrency(Number(pool.total_liquidity))}</td>
+      <td>{formatCurrency(Number(pool.available_liquidity))}</td>
       <td>
         <button
           onClick={handleToggle}
@@ -226,7 +227,7 @@ function LoanRow({ loan, pools, onApproved }: { loan: Loan; pools: Pool[]; onApp
     <tr>
       <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>{String(loan.id).slice(0, 8)}</td>
       <td>{loan.borrower_profile?.full_name ?? "—"}</td>
-      <td>{Number(loan.principal_amount).toFixed(2)} XLM</td>
+      <td>{formatCurrency(Number(loan.principal_amount))}</td>
       <td>{(loan.apr_bps / 100).toFixed(2)}%</td>
       <td>{loan.duration_days}d</td>
       <td>
@@ -247,7 +248,7 @@ function LoanRow({ loan, pools, onApproved }: { loan: Loan; pools: Pool[]; onApp
               ) : (
                 activePools.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({Number(p.available_liquidity).toFixed(0)} XLM available)
+                    {p.name} ({formatCurrency(Number(p.available_liquidity))} available)
                   </option>
                 ))
               )}

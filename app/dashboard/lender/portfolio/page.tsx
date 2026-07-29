@@ -3,6 +3,7 @@ import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
+import { formatCurrency, formatXlmPrecise } from "@/lib/utils/formatting";
 
 export default async function LenderPortfolioPage() {
   const { user } = await requireAuthenticatedUser("lender");
@@ -86,11 +87,11 @@ export default async function LenderPortfolioPage() {
                  </div>
               </div>
               <p style={{ fontSize: "2rem", fontWeight: 800, margin: "0 0 0.5rem" }}>
-                {marketplaceProfit > 0 ? "+" : ""}{marketplaceProfit.toFixed(2)} XLM
+                {marketplaceProfit > 0 ? "+" : ""}{formatCurrency(marketplaceProfit)}
               </p>
               <div style={{ fontSize: "0.85rem", opacity: 0.8, display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: "0.5rem", marginTop: "0.5rem" }}>
-                 <span>Deployed: {marketplaceDeployed.toFixed(2)} XLM</span>
-                 <span>Received: {marketplaceReceived.toFixed(2)} XLM</span>
+                 <span>Deployed: {formatCurrency(marketplaceDeployed)}</span>
+                 <span>Received: {formatCurrency(marketplaceReceived)}</span>
               </div>
            </article>
 
@@ -103,10 +104,10 @@ export default async function LenderPortfolioPage() {
                  </div>
               </div>
               <p style={{ fontSize: "2rem", fontWeight: 800, margin: "0 0 0.5rem" }}>
-                {poolProfit > 0 ? "+" : ""}{poolProfit.toFixed(4)} XLM
+                {poolProfit > 0 ? "+" : ""}{formatXlmPrecise(poolProfit)}
               </p>
               <div style={{ fontSize: "0.85rem", opacity: 0.8, display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: "0.5rem", marginTop: "0.5rem" }}>
-                 <span>Total Deployed: {positions.reduce((s,p) => s + Number(p.principal_amount), 0).toFixed(2)} XLM</span>
+                 <span>Total Deployed: {formatCurrency(positions.reduce((s,p) => s + Number(p.principal_amount), 0))}</span>
                  <span>Positions: {positions.length}</span>
               </div>
            </article>
@@ -139,8 +140,8 @@ export default async function LenderPortfolioPage() {
                                   {String(position.status).toUpperCase()}
                                </span>
                              </td>
-                             <td>{Number(position.principal_amount ?? 0).toFixed(2)} XLM</td>
-                             <td style={{ color: "#22cf9d", fontWeight: "bold" }}>+{Number(position.earned_interest ?? 0).toFixed(4)} XLM</td>
+                             <td>{formatCurrency(Number(position.principal_amount ?? 0))}</td>
+                             <td style={{ color: "#22cf9d", fontWeight: "bold" }}>+{formatXlmPrecise(Number(position.earned_interest ?? 0))}</td>
                           </tr>
                         ))}
                      </tbody>

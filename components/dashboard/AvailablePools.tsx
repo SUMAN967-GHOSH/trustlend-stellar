@@ -15,7 +15,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getBrowserSupabaseClient } from "@/lib/supabase/client";
-import { formatTokenBalance } from "@/lib/utils/formatting";
+import { formatTokenBalance, formatCurrency } from "@/lib/utils/formatting";
 import { PoolCardSkeleton } from "./PoolCardSkeleton";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ function PoolCard({
 }) {
   const apr = (Number(pool.apr_bps ?? 0) / 100).toFixed(2);
   const totalSize = formatTokenBalance(Number(pool.total_liquidity ?? 0));
-  const available = (Number(pool.available_liquidity ?? 0) / 10000000).toFixed(2);
+  const available = formatTokenBalance(Number(pool.available_liquidity ?? 0));
 
   return (
     <motion.article
@@ -168,7 +168,7 @@ function PoolCard({
         {[
           { label: "APR", value: `${apr}%`, accent: "#22cf9d" },
           { label: "Total Size", value: totalSize, accent: undefined },
-          { label: "Available", value: `${available} XLM`, accent: undefined },
+          { label: "Available", value: available, accent: undefined },
         ].map(({ label, value, accent }) => (
           <div key={label} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
             <p
@@ -211,7 +211,7 @@ function PoolCard({
           </p>
           {myPosition ? (
             <p style={{ fontWeight: 700, fontSize: "0.88rem", color: "#22cf9d", margin: 0 }}>
-              {Number(myPosition.principal_amount ?? 0).toFixed(2)} XLM ✅
+              {formatCurrency(Number(myPosition.principal_amount ?? 0))} ✅
             </p>
           ) : (
             <p style={{ fontSize: "0.82rem", opacity: 0.4, margin: 0 }}>—</p>

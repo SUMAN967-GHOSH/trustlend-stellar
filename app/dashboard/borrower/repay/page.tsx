@@ -5,6 +5,7 @@ import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashb
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/Badge";
+import { formatCurrency } from "@/lib/utils/formatting";
 
 export default async function BorrowerRepayPage() {
   const { user } = await requireAuthenticatedUser("borrower");
@@ -117,7 +118,7 @@ export default async function BorrowerRepayPage() {
                       {normalizedLoans.map((loan) => (
                         <tr key={String(loan.id)} style={{ borderBottom: "1px solid #f9fafb" }}>
                           <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>{String(loan.id).slice(0, 8)}</td>
-                          <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>
+                          <td style={{ padding: "0.75rem", fontWeight: 700 }}>{formatCurrency(Number(loan.principal_amount))}</td>
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={
                               (loan.status === "active" || loan.status === "funded") ? "green"  :
@@ -127,7 +128,7 @@ export default async function BorrowerRepayPage() {
                               {String(loan.status).toUpperCase()}
                             </Badge>
                           </td>
-                          <td style={{ padding: "0.75rem" }}>{Number(loan.repaid_amount ?? 0).toFixed(2)} XLM</td>
+                          <td style={{ padding: "0.75rem" }}>{formatCurrency(Number(loan.repaid_amount ?? 0))}</td>
                           <td style={{ padding: "0.75rem" }}>{loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "—"}</td>
                         </tr>
                       ))}
@@ -168,7 +169,7 @@ export default async function BorrowerRepayPage() {
                     </p>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{Number(loan.principal_amount ?? 0).toFixed(2)} XLM</p>
+                    <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatCurrency(Number(loan.principal_amount ?? 0))}</p>
                     <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
                   </div>
                 </div>

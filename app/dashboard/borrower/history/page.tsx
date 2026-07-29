@@ -5,6 +5,7 @@ import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { ExportCsvButton } from "@/components/dashboard/ExportCsvButton";
+import { formatCurrency } from "@/lib/utils/formatting";
 
 export default async function BorrowerHistoryPage() {
   const { user } = await requireAuthenticatedUser("borrower");
@@ -204,8 +205,8 @@ export default async function BorrowerHistoryPage() {
         {/* Summary cards */}
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem" }}>
           {[
-            { label: "Total Received",   value: `${totalFunded.toFixed(2)} XLM`,   icon: "📥", color: "#7e2fd0" },
-            { label: "Total Repaid",     value: `${totalRepaid.toFixed(2)} XLM`,   icon: "📤", color: "#22cf9d" },
+            { label: "Total Received",   value: formatCurrency(totalFunded),        icon: "📥", color: "#7e2fd0" },
+            { label: "Total Repaid",     value: formatCurrency(totalRepaid),        icon: "📤", color: "#22cf9d" },
             { label: "Transactions",     value: String(transactions.length),        icon: "🔢", color: "#6b7280" },
           ].map((s) => (
             <article key={s.label} style={{
@@ -284,7 +285,7 @@ export default async function BorrowerHistoryPage() {
                     {/* Amount */}
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <p style={{ margin: 0, fontWeight: 800, fontSize: "0.95rem", color: isRequested ? "#d97706" : isFunding ? "#7e2fd0" : "#22cf9d" }}>
-                        {isRequested ? "" : isRepayment ? "-" : "+"}{tx.amount.toFixed(2)} XLM
+                        {isRequested ? "" : isRepayment ? "-" : "+"}{formatCurrency(tx.amount)}
                       </p>
                       <span style={{
                         fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase",

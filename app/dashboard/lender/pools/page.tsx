@@ -8,7 +8,7 @@ import {
 } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
-import { formatTokenBalance } from "@/lib/utils/formatting";
+import { formatTokenBalance, formatCurrency, formatXlmPrecise } from "@/lib/utils/formatting";
 import {
   isLikelyTxHash,
   buildStellarTxVerificationUrl,
@@ -193,7 +193,7 @@ export default async function LenderPoolsPage() {
                   }}
                 >
                   {availableWalletBalance > 0
-                    ? `${availableWalletBalance.toFixed(2)} XLM`
+                    ? formatCurrency(availableWalletBalance)
                     : walletAddress
                       ? "Connect a wallet to load balance"
                       : "Wallet not connected"}
@@ -218,11 +218,11 @@ export default async function LenderPoolsPage() {
               {[
                 {
                   label: "Deployed in Pools",
-                  value: `${totalDeployed.toFixed(2)} XLM`,
+                  value: formatCurrency(totalDeployed),
                 },
                 {
                   label: "Interest Earned",
-                  value: `${totalEarned.toFixed(4)} XLM`,
+                  value: formatXlmPrecise(totalEarned),
                   green: true,
                 },
                 {
@@ -268,11 +268,11 @@ export default async function LenderPoolsPage() {
             {[
               {
                 label: "Your Total Deployed",
-                value: `${totalDeployed.toFixed(2)} XLM`,
+                value: formatCurrency(totalDeployed),
               },
               {
                 label: "Total Interest Earned",
-                value: `${totalEarned.toFixed(4)} XLM`,
+                value: formatXlmPrecise(totalEarned),
                 green: true,
               },
               {
@@ -505,13 +505,13 @@ export default async function LenderPoolsPage() {
                         <span>
                           Deployed:{" "}
                           <strong>
-                            {Number(pos.principal_amount ?? 0).toFixed(2)} XLM
+                            {formatCurrency(Number(pos.principal_amount ?? 0))}
                           </strong>
                         </span>
                         <span>
                           Earned:{" "}
                           <strong style={{ color: "#22cf9d" }}>
-                            {Number(pos.earned_interest ?? 0).toFixed(4)} XLM
+                            {formatXlmPrecise(Number(pos.earned_interest ?? 0))}
                           </strong>
                         </span>
                       </div>
@@ -577,7 +577,7 @@ export default async function LenderPoolsPage() {
                           </span>
                         </td>
                         <td style={{ fontWeight: 600 }}>
-                          {Number(tx.amount || 0).toFixed(2)} XLM
+                          {formatCurrency(Number(tx.amount || 0))}
                         </td>
                         <td
                           style={{
