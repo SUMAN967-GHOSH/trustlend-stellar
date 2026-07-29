@@ -99,6 +99,17 @@ export interface EscrowHold {
   status: EscrowStatus;
 }
 
+// ── Interest Rate Model ───────────────────────────────────────────────────────
+
+/** Whether a loan uses a fixed or floating interest rate. */
+export type InterestRateModel = "Fixed" | "Floating";
+
+/** Fee charged when switching rate models, in bps of remaining debt (0.5%). */
+export const RATE_SWITCH_FEE_BPS = 50;
+
+/** Cooldown between rate model switches in seconds (24 hours). */
+export const RATE_SWITCH_COOLDOWN_SECS = 86_400;
+
 // ── Lending ───────────────────────────────────────────────────────────────────
 
 export type LoanStatus =
@@ -116,7 +127,7 @@ export interface LoanRecord {
   /** Principal in stroops */
   amount: bigint;
   durationDays: number;
-  /** APY in basis-points */
+  /** APY in basis-points (current effective rate) */
   interestRateBps: number;
   /** Principal + interest in stroops */
   totalDue: bigint;
@@ -128,6 +139,16 @@ export interface LoanRecord {
   escrowId: number;
   /** 1 % of interest, in stroops */
   platformFee: bigint;
+  /** Collateral asset address */
+  collateralAsset: string;
+  /** Collateral amount in asset's smallest unit */
+  collateralAmount: bigint;
+  /** Interest rate model: Fixed or Floating (defaults to Fixed for backward compat) */
+  rateModel: InterestRateModel;
+  /** Baseline rate at loan creation in bps (anchors floating calculations) */
+  baseRateBps: number;
+  /** Timestamp of the last floating rate adjustment */
+  lastRateUpdate: bigint;
 }
 
 export interface PaymentRecord {
@@ -135,6 +156,7 @@ export interface PaymentRecord {
   amount: bigint;
   paidAt: bigint;
 }
+
 
 // ── Default management ────────────────────────────────────────────────────────
 
@@ -249,6 +271,41 @@ export const LOAN_STATUS_LABEL: Record<LoanStatus, string> = {
   Active: "Active",
   Repaid: "Repaid",
   Defaulted: "Defaulted",
+  Cancelled: "Cancelled",
+};
+
+// ── Multi-Sig Admin ────────────────────────────────────────────────────────────
+
+export type MultiSigProposalStatus = "Active" | "Executed" | "Cancelled";
+
+/**
+ * Mirrors the Rust `AdminAction` tuple-variant enum. Decoded shape from
+ * `scValToNative` is `{ VariantName: [field0, field1, ...] }`.
+ */
+export type MultiSigAdminAction =
+  | { WhitelistAsset: [string, string] } // [target, asset]
+  | { SetFlashLoanFeeBps: [string, number] } // [target, newFeeBps]
+  | { SetGovernance: [string, string] } // [target, governance]
+  | { SetOracle: [string, string] } // [target, oracle]
+  | { AddToInsurance: [string, bigint] } // [target, amount]
+  | { TriggerInsurancePayout: [string, number, string, bigint] } // [target, loanId, lender, amount]
+  | { AddSigner: [string] } // [newSigner]
+  | { RemoveSigner: [string] } // [signer]
+  | { SetThreshold: [number] }; // [newThreshold]
+
+export interface MultiSigProposal {
+  id: number;
+  proposer: string;
+  action: MultiSigAdminAction;
+  /** Distinct signer addresses who have approved, in approval order. */
+  approvals: string[];
+  createdAt: bigint;
+  status: MultiSigProposalStatus;
+}
+
+export const MULTISIG_PROPOSAL_STATUS_LABEL: Record<MultiSigProposalStatus, string> = {
+  Active: "Awaiting Approvals",
+  Executed: "Executed",
   Cancelled: "Cancelled",
 };
 

@@ -1,0 +1,35 @@
+# Codecov configuration for TrustLend Soroban contracts
+# https://docs.codecov.com/docs/codecovyml-reference
+
+coverage:
+  status:
+    project:
+      default:
+        # Allow coverage to drop by up to 2% before marking as failure.
+        # Smart contracts are hard to test exhaustively, so we tolerate small dips.
+        threshold: 2%
+        flags:
+          - rust-contracts
+    patch:
+      default:
+        # Require at least 1% coverage on new/changed lines.
+        threshold: 1%
+        flags:
+          - rust-contracts
+
+flag_management:
+  individual_flags:
+    - name: rust-contracts
+      paths:
+        - contracts/
+      statuses:
+        - type: project
+          threshold: 2%
+        - type: patch
+          threshold: 1%
+
+ignore:
+  # Exclude test helpers from coverage requirements
+  - "**/test.rs"
+  - "**/tests/**"
+  - "**/target/**"

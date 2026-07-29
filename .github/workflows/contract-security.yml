@@ -7,6 +7,9 @@ on:
       - 'contracts/**'
       - '.github/workflows/contract-security.yml'
 
+permissions:
+  contents: read
+
 jobs:
   clippy:
     name: Run Cargo Clippy
@@ -36,8 +39,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Generate lockfile
+        working-directory: ./contracts
+        run: cargo generate-lockfile
+
       - name: Run Cargo Audit
-        uses: rustsec/audit-check@v1.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: contracts
+        working-directory: ./contracts
+        run: cargo audit

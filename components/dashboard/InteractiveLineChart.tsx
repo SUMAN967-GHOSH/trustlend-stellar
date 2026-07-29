@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { LineChartSkeleton } from "@/components/dashboard/ChartSkeleton";
 
 interface Point {
   x: number;
@@ -10,14 +11,39 @@ interface Point {
 
 export function InteractiveLineChart({
   points,
-  color = "#22cf9d"
+  color = "#22cf9d",
+  loading = false,
 }: {
   points: { value: number; label: string }[];
   color?: string;
+  /** Show animated skeleton placeholder when true. */
+  loading?: boolean;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
-  if (!points || points.length === 0) return <div style={{ height: "100px", opacity: 0.5 }}>No data available</div>;
+  // ── Loading state: show skeleton ────────────────────────────────────────────
+  if (loading) {
+    return <LineChartSkeleton pointCount={7} height={200} />;
+  }
+
+  // ── Empty state ─────────────────────────────────────────────────────────────
+  if (!points || points.length === 0) {
+    return (
+      <div
+        style={{
+          height: "200px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: 0.5,
+          fontSize: "0.85rem",
+          color: "#6b7280",
+        }}
+      >
+        No data available
+      </div>
+    );
+  }
 
   // Normalize points to SVG space (0-100 x, 0-40 y)
   const W = 1000;

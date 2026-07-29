@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Commit message hook — validates the message matches conventional commit format.
+# Husky v9 uses plain shell scripts; no need to source _/husky.sh
+
+npx --no -- commitlint --edit "$1"

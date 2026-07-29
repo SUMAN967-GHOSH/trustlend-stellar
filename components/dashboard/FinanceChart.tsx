@@ -1,3 +1,5 @@
+import { BarChartSkeleton } from "@/components/dashboard/ChartSkeleton";
+
 interface FinanceChartPoint {
   label: string;
   valueA: number;
@@ -9,9 +11,16 @@ interface FinanceChartProps {
   legendA: string;
   legendB: string;
   points: FinanceChartPoint[];
+  /** Show animated skeleton placeholder when true. */
+  loading?: boolean;
 }
 
-export function FinanceChart({ title, legendA, legendB, points }: FinanceChartProps) {
+export function FinanceChart({ title, legendA, legendB, points, loading = false }: FinanceChartProps) {
+  // ── Loading state: show skeleton ────────────────────────────────────────────
+  if (loading) {
+    return <BarChartSkeleton groupCount={6} titleWidth="40%" />;
+  }
+
   const maxValue = Math.max(1, ...points.flatMap((point) => [point.valueA, point.valueB]));
 
   return (

@@ -1,0 +1,8 @@
+# Soroban WASM build configuration
+# Use `stellar contract build` or `cargo build --release --target wasm32-unknown-unknown`
+# Do NOT set a default target here — `cargo test` runs on the host target.
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "link-arg=--stack-first",
+]

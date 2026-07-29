@@ -1,0 +1,61 @@
+# SubQuery Manifest File for Soroban Smart Contracts
+# See docker-compose.subquery.yml for Docker-based local development.
+
+specVersion: 1.0.0
+name: trustlend-soroban-indexer
+version: 0.1.0
+runner:
+  node:
+    name: '@subql/node-stellar'
+    version: '*'
+  query:
+    name: '@subql/query'
+    version: '*'
+description: >-
+  Indexer to capture deposits, borrows, and liquidations from TrustLend Soroban contracts
+repository: 'https://github.com/thisisouvik/trustlend-stellar'
+schema:
+  file: ./schema.graphql
+
+network:
+  # Stellar Testnet passphrase and RPC endpoint
+  chainId: 'Test SDF Network ; September 2015'
+  endpoint: 'https://soroban-testnet.stellar.org'
+  # Genesis ledger to start indexing from
+  genesisHash: '0000000000000000000000000000000000000000000000000000000000000000'
+
+dataSources:
+  # ── Lending Contract ────────────────────────────────────────────────────
+  - kind: stellar/Soroban
+    startBlock: 12345678 # TODO: Replace with actual lending contract deployment ledger height
+    mapping:
+      file: ./dist/index.js
+      handlers:
+        - handler: handleLendingEvent
+          kind: stellar/SorobanEventHandler
+          filter:
+            contractId: "NEXT_PUBLIC_LENDING_CONTRACT_ID"
+            topics:
+              - "loan"
+
+  # ── Reputation Contract ─────────────────────────────────────────────────
+  - kind: stellar/Soroban
+    startBlock: 12345678 # TODO: Replace with actual reputation contract deployment ledger height
+    mapping:
+      file: ./dist/index.js
+      handlers:
+        - handler: handleReputationEvent
+          kind: stellar/SorobanEventHandler
+          filter:
+            contractId: "NEXT_PUBLIC_REPUTATION_CONTRACT_ID"
+
+  # ── Escrow Contract ─────────────────────────────────────────────────────
+  - kind: stellar/Soroban
+    startBlock: 12345678 # TODO: Replace with actual escrow contract deployment ledger height
+    mapping:
+      file: ./dist/index.js
+      handlers:
+        - handler: handleEscrowEvent
+          kind: stellar/SorobanEventHandler
+          filter:
+            contractId: "NEXT_PUBLIC_ESCROW_CONTRACT_ID"

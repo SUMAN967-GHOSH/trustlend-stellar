@@ -1,0 +1,22 @@
+{
+  "name": "trustlend-soroban-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "codegen": "subql codegen",
+    "build": "subql build",
+    "start:docker": "docker compose -f ../docker-compose.subquery.yml pull && docker compose -f ../docker-compose.subquery.yml up --remove-orphans",
+    "dev": "subql codegen && subql build && docker compose -f ../docker-compose.subquery.yml up"
+  },
+  "dependencies": {
+    "@subql/node-stellar": "^4.0.0",
+    "@subql/query": "^4.0.0",
+    "@subql/types-stellar": "^4.0.0",
+    "ethers": "^6.0.0",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@subql/cli": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

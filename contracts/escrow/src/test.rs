@@ -148,3 +148,136 @@ fn test_deposit_and_withdraw_emit_events() {
         ]
     );
 }
+
+// ─── Pausable / Multi-sig tests ──────────────────────────────────────────────
+
+fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(START_TIMESTAMP);
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let lender = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let signer1 = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
+    client.setup_multisig(&admin, &admins, &2);
+
+    (env, contract_id, admin, lender, borrower, signer1)
+}
+
+#[test]
+fn test_escrow_setup_multisig() {
+    let (env, contract_id, admin, _lender, _borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admins = client.get_multisig_admins();
+    assert_eq!(admins.len(), 2);
+    assert!(admins.iter().any(|a| a == admin));
+    assert!(admins.iter().any(|a| a == signer1));
+    assert_eq!(client.get_multisig_threshold(), 2);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn test_escrow_pause_activates_with_threshold() {
+    let (env, contract_id, admin, _lender, _borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    assert!(!client.is_paused());
+
+    client.pause(&admin);
+    assert!(!client.is_paused());
+
+    client.pause(&signer1);
+    assert!(client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_escrow_create_hold_blocked_when_paused() {
+    let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    client.create_hold(&lender, &borrower, &1, &5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_escrow_confirm_disbursement_blocked_when_paused() {
+    let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Create a hold while unpaused
+    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let hold = client.get_hold(&escrow_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Move time past the revocation window
+    env.ledger().set_timestamp(hold.expires_at);
+    client.confirm_disbursement(&admin, &escrow_id);
+}
+
+#[test]
+fn test_escrow_revoke_hold_allowed_when_paused() {
+    let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Create a hold while unpaused
+    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let hold = client.get_hold(&escrow_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+
+    // Revoke should still work (lender protecting their funds)
+    env.ledger().set_timestamp(hold.expires_at - 1);
+    client.revoke_hold(&lender, &escrow_id);
+
+    let updated = client.get_hold(&escrow_id);
+    assert_eq!(updated.status, EscrowStatus::Revoked);
+}
+
+#[test]
+fn test_escrow_unpause_restores_operations() {
+    let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Pause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    // Unpause
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Create hold should work again
+    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let hold = client.get_hold(&escrow_id);
+    assert_eq!(hold.status, EscrowStatus::Held);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_escrow_non_admin_cannot_pause() {
+    let (env, contract_id, _admin, _lender, _borrower, _signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    client.pause(&random);
+}

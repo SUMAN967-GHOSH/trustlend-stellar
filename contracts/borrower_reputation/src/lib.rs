@@ -1,11 +1,12 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec, BytesN};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /// Reputation tiers — determine loan limits and interest rates.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ReputationTier {
     None,
     Beginner,
@@ -16,7 +17,8 @@ pub enum ReputationTier {
 
 /// Reputation events — each one carries a fixed point delta.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ReputationEvent {
     TestLoanRepaid,    // +50 pts
     LoanRepaidOnTime,  // +20 pts
@@ -81,6 +83,14 @@ pub enum DataKey {
     Oracle,
     /// Stores the latest OracleCreditData for a borrower
     OracleData(Address),
+    MultiSigAdmin,
+    MultisigAdmins,
+    MultisigThreshold,
+    IsPaused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    UnpauseSigner(Address),
+    UnpauseSignerCount,
 }
 
 // ─── Oracle constants ───────────────────────────────────────────────────────────
@@ -108,6 +118,145 @@ impl BorrowerReputationContract {
             panic!("Contract already initialised");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+    }
+
+    /// Upgrade the contract's code while preserving its storage.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Configure multi-sig admin set for pause/unpause.
+    pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if threshold > admins.len() {
+            panic!("Threshold exceeds number of admins");
+        }
+
+        let mut final_admins = admins;
+        if !final_admins.iter().any(|a| a == admin) {
+            final_admins.push_back(admin);
+        }
+
+        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+    }
+
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is already paused");
+        }
+
+        let signer_key = DataKey::PauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised pause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &true);
+            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("rep"), symbol_short!("paused")),
+                (),
+            );
+        }
+    }
+
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised unpause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &false);
+            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+            env.events().publish(
+                (symbol_short!("rep"), symbol_short!("unpaused")),
+                (),
+            );
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn get_multisig_admins(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_multisig_threshold(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigThreshold)
+            .unwrap_or(1)
+    }
+
+    pub fn get_pause_signer_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0)
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -186,13 +335,37 @@ impl BorrowerReputationContract {
         Self::tier_interest_rate(&profile.reputation_tier)
     }
 
-    // ── Decentralized Credit Oracle ────────────────────────────────────────────
-
-    /// Register / rotate the authorized Credit Oracle address (admin only).
-    /// Only this address may call `submit_credit_score`.
-    pub fn set_oracle(env: Env, admin: Address, oracle: Address) {
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    /// Once set, `set_oracle` can ONLY be called by this address — a
+    /// compromised single admin key can no longer redirect who is trusted to
+    /// write credit-score data.
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        let mut msig_admins = Vec::new(&env);
+        msig_admins.push_back(multisig);
+        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
+    // ── Decentralized Credit Oracle ────────────────────────────────────────────
+
+    /// Register / rotate the authorized Credit Oracle address. Multisig-gated
+    /// — see `set_multisig_admin`. Only this oracle address may call
+    /// `submit_credit_score`.
+    pub fn set_oracle(env: Env, caller: Address, oracle: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Oracle, &oracle);
         env.events()
             .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
@@ -276,6 +449,7 @@ impl BorrowerReputationContract {
     ) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
 
         let key = DataKey::BorrowerProfile(borrower.clone());
         let mut profile: BorrowerProfile = env
@@ -301,6 +475,11 @@ impl BorrowerReputationContract {
         }
 
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("event")),
+            (borrower, event, delta, new_score),
+        );
     }
 
     /// Update cumulative borrowed/repaid amounts.
@@ -324,14 +503,20 @@ impl BorrowerReputationContract {
         profile.total_borrowed += borrowed_delta;
         profile.total_repaid += repaid_delta;
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("totals")),
+            (borrower, borrowed_delta, repaid_delta),
+        );
     }
 
     /// Freeze an account (admin only).
     pub fn freeze_account(env: Env, admin: Address, borrower: Address, reason: String) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        Self::assert_not_paused(&env);
 
-        let key = DataKey::BorrowerProfile(borrower);
+        let key = DataKey::BorrowerProfile(borrower.clone());
         let mut profile: BorrowerProfile = env
             .storage()
             .persistent()
@@ -343,6 +528,11 @@ impl BorrowerReputationContract {
         profile.reputation_score = 0;
         profile.reputation_tier = ReputationTier::None;
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("freeze")),
+            (borrower, true),
+        );
     }
 
     /// Unfreeze an account (admin only).
@@ -350,7 +540,7 @@ impl BorrowerReputationContract {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
 
-        let key = DataKey::BorrowerProfile(borrower);
+        let key = DataKey::BorrowerProfile(borrower.clone());
         let mut profile: BorrowerProfile = env
             .storage()
             .persistent()
@@ -360,6 +550,11 @@ impl BorrowerReputationContract {
         profile.is_frozen = false;
         profile.freeze_reason = String::from_str(&env, "");
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("freeze")),
+            (borrower, false),
+        );
     }
 
     pub fn is_frozen(env: Env, borrower: Address) -> bool {
@@ -452,6 +647,14 @@ impl BorrowerReputationContract {
     }
 
     fn assert_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if !multisig_admins.is_empty() && multisig_admins.iter().any(|a| a == *caller) {
+            return;
+        }
         let admin: Address = env
             .storage()
             .instance()
@@ -459,6 +662,31 @@ impl BorrowerReputationContract {
             .expect("Contract not initialised");
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
+        }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if multisig_admins.is_empty() {
+            panic!("Multisig not configured");
+        }
+        if !multisig_admins.iter().any(|a| a == *caller) {
+            panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    fn assert_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
         }
     }
 }

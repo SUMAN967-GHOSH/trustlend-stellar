@@ -10,8 +10,9 @@ import {
   addressToScVal,
   u32ToScVal,
   i128ToScVal,
+  bytesToScVal,
 } from "@/lib/stellar/soroban";
-import type { LoanRecord, LoanStatus, PaymentRecord } from "@/types/contracts";
+import type { LoanRecord, LoanStatus, PaymentRecord, InterestRateModel } from "@/types/contracts";
 
 const CONTRACT_ID = process.env.NEXT_PUBLIC_LENDING_CONTRACT_ID!;
 
@@ -122,7 +123,44 @@ export async function getGovernance(callerAddress: string): Promise<string> {
   return result as string;
 }
 
+/** Current flash-loan fee in basis-points of the borrowed amount (default 9 = 0.09%). */
+export async function getFlashLoanFeeBps(callerAddress: string): Promise<number> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_flash_loan_fee_bps",
+    args: [],
+    callerAddress,
+  });
+  return Number(result);
+}
+
+/** Address of the linked MultiSigAdmin contract (issue #73). */
+export async function getMultisigAdmin(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_multisig_admin",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
 // ─── Write functions ──────────────────────────────────────────────────────────
+
+/**
+ * One-time admin bootstrap: link the MultiSigAdmin contract. After this,
+ * `whitelistAsset` / `setFlashLoanFeeBps` / `setGovernance` can only be
+ * called by that multisig — the plain admin key loses direct access
+ * permanently.
+ */
+export async function setMultisigAdmin(adminAddress: string, multisigAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_multisig_admin",
+    args: [addressToScVal(adminAddress), addressToScVal(multisigAddress)],
+    callerAddress: adminAddress,
+  });
+}
 
 /**
  * One-time admin bootstrap: link the Governance contract. After this, the
@@ -137,6 +175,45 @@ export async function setGovernance(adminAddress: string, governanceAddress: str
   });
 }
 
+/** Update the flash-loan fee, capped on-chain at 500 bps (5%) (admin only). */
+export async function setFlashLoanFeeBps(adminAddress: string, newFeeBps: number) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_flash_loan_fee_bps",
+    args: [addressToScVal(adminAddress), u32ToScVal(newFeeBps)],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Execute an uncollateralized flash loan against the pool's balance of `token`.
+ *
+ * `receiverAddress` must be a deployed contract implementing the
+ * `FlashLoanReceiver` callback interface (`execute_operation(token, amount,
+ * fee, initiator, params)`). It must transfer back `amount + fee` of `token`
+ * to this LendingContract before its callback returns, or the whole
+ * transaction — including the initial disbursement — reverts on-chain.
+ */
+export async function flashLoan(
+  callerAddress: string,
+  receiverAddress: string,
+  tokenAddress: string,
+  amountStroops: bigint,
+  params: Uint8Array = new Uint8Array()
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "flash_loan",
+    args: [
+      addressToScVal(receiverAddress),
+      addressToScVal(tokenAddress),
+      i128ToScVal(amountStroops),
+      bytesToScVal(params),
+    ],
+    callerAddress,
+  });
+}
+
 /**
  * Borrower creates a loan request.
  * `interestRateBps` and `maxLoanAmount` should be fetched from the
@@ -147,8 +224,13 @@ export async function createLoanRequest(
   amountStroops: bigint,
   durationDays: number,
   interestRateBps: number,
-  maxLoanAmountStroops: bigint
+  maxLoanAmountStroops: bigint,
+  collateralAssetAddress: string,
+  collateralAmount: bigint,
+  rateModel: InterestRateModel = "Fixed",
 ): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rateModelScVal = { type: "symbol", value: rateModel } as any;
   const result = await callContract({
     contractId: CONTRACT_ID,
     method: "create_loan_request",
@@ -158,10 +240,47 @@ export async function createLoanRequest(
       u32ToScVal(durationDays),
       u32ToScVal(interestRateBps),
       i128ToScVal(maxLoanAmountStroops),
+      addressToScVal(collateralAssetAddress),
+      i128ToScVal(collateralAmount),
+      rateModelScVal,
     ],
     callerAddress: borrowerAddress,
   });
   return Number(result);
+}
+
+/**
+ * Whitelist a new collateral asset (admin only)
+ */
+export async function whitelistAsset(
+  adminAddress: string,
+  assetAddress: string
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "whitelist_asset",
+    args: [
+      addressToScVal(adminAddress),
+      addressToScVal(assetAddress),
+    ],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Check if an asset is whitelisted
+ */
+export async function isAssetWhitelisted(
+  assetAddress: string,
+  callerAddress: string
+): Promise<boolean> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "is_asset_whitelisted",
+    args: [addressToScVal(assetAddress)],
+    callerAddress,
+  });
+  return result as boolean;
 }
 
 /**
@@ -246,6 +365,45 @@ export async function markLoanDefaulted(adminAddress: string, loanId: number) {
   });
 }
 
+// ─── Rate model functions ─────────────────────────────────────────────────────
+
+/**
+ * Borrower switches their loan between Fixed and Floating rate models.
+ * Charges a 0.5% fee on remaining debt and enforces a 24h cooldown.
+ */
+export async function switchRateModel(
+  borrowerAddress: string,
+  loanId: number,
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "switch_rate_model",
+    args: [addressToScVal(borrowerAddress), u32ToScVal(loanId)],
+    callerAddress: borrowerAddress,
+  });
+}
+
+/**
+ * Admin updates the floating rate for a loan. Only applies to Floating-rate loans.
+ * Recalculates remaining interest with the new rate.
+ */
+export async function updateFloatingRate(
+  adminAddress: string,
+  loanId: number,
+  newRateBps: number,
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "update_floating_rate",
+    args: [
+      addressToScVal(adminAddress),
+      u32ToScVal(loanId),
+      u32ToScVal(newRateBps),
+    ],
+    callerAddress: adminAddress,
+  });
+}
+
 // ─── Decoders ─────────────────────────────────────────────────────────────────
 
 function decodeLoan(raw: unknown): LoanRecord {
@@ -264,6 +422,11 @@ function decodeLoan(raw: unknown): LoanRecord {
     status: extractEnumVariant(r.status) as LoanStatus,
     escrowId: Number(r.escrow_id),
     platformFee: BigInt(r.platform_fee as string | number),
+    collateralAsset: r.collateral_asset as string,
+    collateralAmount: BigInt(r.collateral_amount as string | number),
+    rateModel: (extractEnumVariant(r.rate_model) as InterestRateModel) ?? "Fixed",
+    baseRateBps: Number(r.base_rate_bps ?? r.interest_rate_bps),
+    lastRateUpdate: BigInt((r.last_rate_update ?? r.created_at ?? 0) as string | number),
   };
 }
 

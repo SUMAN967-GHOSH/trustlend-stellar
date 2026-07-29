@@ -10,11 +10,14 @@ import {
 
 interface LoanApplicationFormProps {
   maxAmount: number;
-  onSubmit: (amount: number, duration: number) => Promise<void>;
+  onSubmit: (amount: number, duration: number, collateralAsset: string, collateralAmount: number, rateModel: "fixed" | "floating") => Promise<void>;
 }
 export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationFormProps) {
   const [amount, setAmount] = useState("");
   const [duration, setDuration] = useState("60");
+  const [collateralAsset, setCollateralAsset] = useState("");
+  const [collateralAmount, setCollateralAmount] = useState("");
+  const [rateModel, setRateModel] = useState<"fixed" | "floating">("fixed");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,13 +28,25 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
 
     try {
       const amountNum = parseFloat(amount);
+      const collateralAmountNum = parseFloat(collateralAmount);
       if (!amountNum || amountNum <= 0 || amountNum > maxAmount) {
         setError(`Amount must be between 1 and ${maxAmount}`);
         return;
       }
-      await onSubmit(amountNum, parseInt(duration));
+      if (!collateralAsset) {
+        setError("Please select a collateral asset");
+        return;
+      }
+      if (!collateralAmountNum || collateralAmountNum <= 0) {
+        setError("Collateral amount must be positive");
+        return;
+      }
+      await onSubmit(amountNum, parseInt(duration), collateralAsset, collateralAmountNum, rateModel);
       setAmount("");
       setDuration("60");
+      setCollateralAsset("");
+      setCollateralAmount("");
+      setRateModel("fixed");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit application");
     } finally {
@@ -70,6 +85,68 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
           <option value="60">60 days (12% interest)</option>
           <option value="90">90 days (10% interest)</option>
         </select>
+      </div>
+
+      <div>
+        <label className="workspace-label">Collateral Asset Address</label>
+        <input
+          type="text"
+          value={collateralAsset}
+          onChange={(e) => setCollateralAsset(e.target.value)}
+          placeholder="Enter collateral asset address"
+          className="workspace-input"
+          disabled={loading}
+        />
+      </div>
+
+      <div>
+        <label className="workspace-label">Collateral Amount</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={collateralAmount}
+          onChange={(e) => setCollateralAmount(e.target.value)}
+          placeholder="Enter collateral amount"
+          className="workspace-input"
+          disabled={loading}
+        />
+      </div>
+
+      <div>
+        <label className="workspace-label">Interest Rate Model</label>
+        <div className="rate-model-selector" style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="rateModel"
+              value="fixed"
+              checked={rateModel === "fixed"}
+              onChange={() => setRateModel("fixed")}
+              disabled={loading}
+              style={{ marginTop: '0.25rem' }}
+            />
+            <div>
+              <strong>Fixed Rate</strong>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>Lock in your rate. Predictable payments.</p>
+            </div>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="rateModel"
+              value="floating"
+              checked={rateModel === "floating"}
+              onChange={() => setRateModel("floating")}
+              disabled={loading}
+              style={{ marginTop: '0.25rem' }}
+            />
+            <div>
+              <strong>Floating Rate</strong>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>Starts lower, adjusts with market.</p>
+            </div>
+          </label>
+        </div>
       </div>
 
       {error && <p className="workspace-error">{error}</p>}
@@ -225,13 +302,13 @@ export function BorrowerForms({
   const [, setSorobanLoading] = useState(false);
   const pendingLoans = loans.filter((loan) => String(loan.status) === "requested");
 
-  const handleLoanApplication = async (amount: number, duration: number) => {
+  const handleLoanApplication = async (amount: number, duration: number, collateralAsset: string, collateralAmount: number, rateModel: "fixed" | "floating") => {
     setSorobanLoading(true);
     try {
       const response = await fetch("/api/loans/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default" }),
+        body: JSON.stringify({ amount, duration_days: duration, pool_id: "default", collateral_asset: collateralAsset, collateral_amount: collateralAmount, rateModel }),
       });
 
       if (!response.ok) {
@@ -258,13 +335,17 @@ export function BorrowerForms({
           ]);
 
           const amountStroops = xlmToStroops(amount);
+          const collateralAmountStroops = xlmToStroops(collateralAmount); // assuming same decimals as XLM for now
 
           await LendingContract.createLoanRequest(
             walletAddress,
             amountStroops,
             duration,
             onChainRate,
-            onChainMax
+            onChainMax,
+            collateralAsset,
+            collateralAmountStroops,
+            rateModel === "fixed" ? "Fixed" : "Floating"
           );
 
           console.log("[TrustLend] Soroban loan request recorded.");

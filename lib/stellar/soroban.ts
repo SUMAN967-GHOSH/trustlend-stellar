@@ -57,11 +57,24 @@ export function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: "string" });
 }
 
+/** Encode raw bytes (e.g. flash-loan callback params) as a Soroban Bytes ScVal. */
+export function bytesToScVal(value: Uint8Array | Buffer): xdr.ScVal {
+  return nativeToScVal(value, { type: "bytes" });
+}
+
 /**
  * Encode a unit #[contracttype] enum variant as an ScVec([ScSymbol("Variant")]).
  */
 export function enumToScVal(variant: string): xdr.ScVal {
   return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
+}
+
+/**
+ * Encode a tuple-variant #[contracttype] enum (e.g. `MultiSigAdmin::AdminAction`)
+ * as `ScVec([ScSymbol(variant), field0, field1, ...])`.
+ */
+export function tupleEnumToScVal(variant: string, fields: xdr.ScVal[]): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant), ...fields]);
 }
 
 /** Decode an ScVal returned by the contract back to a native JS value. */
