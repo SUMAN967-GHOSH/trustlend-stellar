@@ -13,10 +13,7 @@ import {
   isIndexerRequired,
 } from "@/lib/indexer/read-model";
 import Link from "next/link";
-
-function formatAmount(value: number) {
-  return `${value.toFixed(2)} XLM`;
-}
+import { formatCurrency } from "@/lib/utils/formatting";
 
 function sumByPeriod(
   rows: Array<{ amount: number; createdAt: string }>,
@@ -197,16 +194,16 @@ export default async function AdminDashboardPage() {
               <article className="workspace-card">
                 <h2 className="workspace-card-title">Loan economy</h2>
                 <p className="workspace-card-copy">Loans sanctioned: {sanctionedLoans.length}</p>
-                <p className="workspace-card-copy">Amount sanctioned: {formatAmount(sanctionedAmount)}</p>
-                <p className="workspace-card-copy">Amount repaid: {formatAmount(repaidAmount)}</p>
+                <p className="workspace-card-copy">Amount sanctioned: {formatCurrency(sanctionedAmount)}</p>
+                <p className="workspace-card-copy">Amount repaid: {formatCurrency(repaidAmount)}</p>
               </article>
 
               <article className="workspace-card">
                 <h2 className="workspace-card-title">Transaction flow</h2>
-                <p className="workspace-card-copy">Today: {formatAmount(txToday)}</p>
-                <p className="workspace-card-copy">Weekly: {formatAmount(txWeekly)}</p>
-                <p className="workspace-card-copy">Monthly: {formatAmount(txMonthly)}</p>
-                <p className="workspace-card-copy">All-time: {formatAmount(txAllTime)}</p>
+                <p className="workspace-card-copy">Today: {formatCurrency(txToday)}</p>
+                <p className="workspace-card-copy">Weekly: {formatCurrency(txWeekly)}</p>
+                <p className="workspace-card-copy">Monthly: {formatCurrency(txMonthly)}</p>
+                <p className="workspace-card-copy">All-time: {formatCurrency(txAllTime)}</p>
               </article>
             </section>
 
@@ -276,7 +273,7 @@ export default async function AdminDashboardPage() {
                       ) : pools.map((p) => (
                         <tr key={String(p.id)}>
                           <td style={{ fontWeight: 600 }}>{String(p.name)}</td>
-                          <td>{formatAmount(Number(p.total_liquidity ?? 0))}</td>
+                          <td>{formatCurrency(Number(p.total_liquidity ?? 0))}</td>
                           <td style={{ color: "#22cf9d", fontWeight: "bold" }}>{(Number(p.apr_bps ?? 0) / 100).toFixed(2)}%</td>
                           <td>
                             <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: p.status === "active" ? "rgba(34,207,157,0.12)" : "rgba(100,100,100,0.12)", color: p.status === "active" ? "#22cf9d" : "inherit" }}>
@@ -308,7 +305,7 @@ export default async function AdminDashboardPage() {
                       ) : loans.map((l) => (
                         <tr key={String(l.id)}>
                           <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.id).slice(0,8)}</td>
-                          <td><strong>{formatAmount(Number(l.principal_amount ?? 0))}</strong></td>
+                          <td><strong>{formatCurrency(Number(l.principal_amount ?? 0))}</strong></td>
                           <td>
                             <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: l.status === "repaid" ? "rgba(155,111,224,0.12)" : "rgba(34,207,157,0.12)", color: l.status === "repaid" ? "#9b6fe0" : "#22cf9d" }}>
                               {String(l.status).toUpperCase()}

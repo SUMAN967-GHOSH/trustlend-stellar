@@ -7,6 +7,7 @@ import {
   getWalletProviderLabel,
   signTransactionWithWallet,
 } from "@/lib/stellar/wallet";
+import { formatCurrency, formatXlmPrecise } from "@/lib/utils/formatting";
 
 interface RepayLoan {
   id: string;
@@ -109,7 +110,7 @@ function SuccessOverlay({
           }}
         >
           <strong style={{ color: "#22cf9d" }}>
-            {data.amount.toFixed(2)} XLM
+            {formatCurrency(data.amount)}
           </strong>{" "}
           has been sent and recorded.
         </p>
@@ -433,7 +434,7 @@ export function BorrowerRepayWidget({
               }}
             >
               {dueAmount > 0
-                ? `${dueAmount.toFixed(2)} XLM remaining`
+                ? `${formatCurrency(dueAmount)} remaining`
                 : "Fully Paid ✅"}
             </span>
             {breakdownData && dueAmount > 0 && (
@@ -480,7 +481,7 @@ export function BorrowerRepayWidget({
             >
               <span>Principal ({breakdownData.durationDays} days):</span>
               <span style={{ fontWeight: 600 }}>
-                {breakdownData.principal.toFixed(2)} XLM
+                {formatCurrency(breakdownData.principal)}
               </span>
             </div>
             <div
@@ -492,7 +493,7 @@ export function BorrowerRepayWidget({
             >
               <span>Interest ({breakdownData.aprPct}% APR):</span>
               <span style={{ fontWeight: 600, color: "#f5a623" }}>
-                +{breakdownData.interest.toFixed(2)} XLM
+                +{formatCurrency(breakdownData.interest)}
               </span>
             </div>
             <div
@@ -504,7 +505,7 @@ export function BorrowerRepayWidget({
             >
               <span>Platform Fee (1%):</span>
               <span style={{ fontWeight: 600, color: "#ef4444" }}>
-                +{breakdownData.platformFee.toFixed(2)} XLM
+                +{formatCurrency(breakdownData.platformFee)}
               </span>
             </div>
             <div
@@ -519,7 +520,7 @@ export function BorrowerRepayWidget({
               }}
             >
               <span>Total Required:</span>
-              <span>{breakdownData.totalDue.toFixed(2)} XLM</span>
+              <span>{formatCurrency(breakdownData.totalDue)}</span>
             </div>
             <div
               style={{
@@ -529,7 +530,7 @@ export function BorrowerRepayWidget({
               }}
             >
               <span>Already Paid:</span>
-              <span>-{breakdownData.alreadyPaid.toFixed(2)} XLM</span>
+              <span>-{formatCurrency(breakdownData.alreadyPaid)}</span>
             </div>
           </div>
         )}
@@ -548,7 +549,7 @@ export function BorrowerRepayWidget({
             <span>
               Repaid:{" "}
               <strong style={{ color: "#22cf9d" }}>
-                {loan.repaid_amount.toFixed(2)} XLM
+                {formatCurrency(loan.repaid_amount)}
               </strong>
             </span>
             <span style={{ fontWeight: 700 }}>{pct}%</span>
@@ -612,7 +613,7 @@ export function BorrowerRepayWidget({
                   ? step === "connecting"
                     ? `Connecting ${activeWalletLabel}...`
                     : STEP_LABELS[step]
-                  : `💳 Pay Full — ${dueAmount.toFixed(2)} XLM`}
+                  : `💳 Pay Full — ${formatCurrency(dueAmount)}`}
               </button>
               <button
                 onClick={() =>
@@ -671,7 +672,7 @@ export function BorrowerRepayWidget({
                   const n = parseFloat(customAmount);
                   if (!n || n <= 0 || n > dueAmount) {
                     setError(
-                      `Enter a value between 0.01 and ${dueAmount.toFixed(2)}`,
+                      `Enter a value between 0.01 and ${formatCurrency(dueAmount)}`,
                     );
                     return;
                   }
@@ -784,7 +785,7 @@ export function BorrowerRepayWidget({
                         color: "#22cf9d",
                       }}
                     >
-                      +{Number(r.amount).toFixed(2)} XLM repaid
+                      +{formatCurrency(Number(r.amount))} repaid
                     </span>
                     <span
                       style={{

@@ -12,13 +12,7 @@ import {
   extractPossibleTxHash,
   STELLAR_NETWORK_LABEL,
 } from "@/lib/stellar/explorer";
-
-function formatAmount(value: number) {
-  return `${new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)} XLM`;
-}
+import { formatCurrency } from "@/lib/utils/formatting";
 
 function sumByPeriod(
   rows: Array<{ amount: number; createdAt: string }>,
@@ -132,19 +126,19 @@ export default async function AdminActivityPage() {
               <article className="workspace-card" style={{ background: "linear-gradient(145deg, rgba(34,207,157,0.05), transparent)", border: "1px solid rgba(34,207,157,0.15)" }}>
                 <h2 className="workspace-card-title" style={{ fontSize: "0.85rem", opacity: 0.8 }}>Transactions Today</h2>
                 <p className="workspace-card-copy" style={{ fontSize: "1.75rem", fontWeight: 700, color: "#22cf9d", margin: "0.25rem 0 0 0" }}>
-                  {formatAmount(today)}
+                  {formatCurrency(today)}
                 </p>
               </article>
               <article className="workspace-card" style={{ background: "linear-gradient(145deg, rgba(84,160,255,0.05), transparent)", border: "1px solid rgba(84,160,255,0.15)" }}>
                 <h2 className="workspace-card-title" style={{ fontSize: "0.85rem", opacity: 0.8 }}>Transactions Weekly</h2>
                 <p className="workspace-card-copy" style={{ fontSize: "1.75rem", fontWeight: 700, color: "#54a0ff", margin: "0.25rem 0 0 0" }}>
-                  {formatAmount(weekly)}
+                  {formatCurrency(weekly)}
                 </p>
               </article>
               <article className="workspace-card" style={{ background: "linear-gradient(145deg, rgba(155,111,224,0.05), transparent)", border: "1px solid rgba(155,111,224,0.15)" }}>
                 <h2 className="workspace-card-title" style={{ fontSize: "0.85rem", opacity: 0.8 }}>Transactions Monthly</h2>
                 <p className="workspace-card-copy" style={{ fontSize: "1.75rem", fontWeight: 700, color: "#9b6fe0", margin: "0.25rem 0 0 0" }}>
-                  {formatAmount(monthly)}
+                  {formatCurrency(monthly)}
                 </p>
               </article>
             </section>
@@ -154,7 +148,7 @@ export default async function AdminActivityPage() {
                 <div style={{ position: "absolute", top: "-50px", right: "-50px", width: "150px", height: "150px", background: "radial-gradient(circle, rgba(155,111,224,0.1) 0%, transparent 70%)", borderRadius: "50%" }} />
                 <h2 className="workspace-card-title" style={{ fontSize: "0.9rem", letterSpacing: "1px", textTransform: "uppercase" }}>Global Ecosystem Volume</h2>
                 <p className="workspace-card-copy" style={{ fontSize: "2.5rem", fontWeight: 800, margin: "0.5rem 0", background: "linear-gradient(90deg, #9b6fe0, #54a0ff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                  {formatAmount(allTime)}
+                  {formatCurrency(allTime)}
                 </p>
                 <div style={{ display: "flex", gap: "1rem", marginTop: "1.5rem" }}>
                   <span style={{ fontSize: "0.8rem", padding: "0.3rem 0.8rem", background: "rgba(0,0,0,0.03)", borderRadius: "9999px", border: "1px solid rgba(0,0,0,0.08)", color: "inherit" }}>
@@ -175,7 +169,7 @@ export default async function AdminActivityPage() {
                     topUsers.map(([userId, amount], index) => (
                       <li key={userId} style={{ display: "flex", justifyContent: "space-between", padding: "0.4rem 0", borderBottom: index === topUsers.length -1 ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
                         <span style={{ fontFamily: "monospace", opacity: 0.7, fontSize: "0.85rem" }}>{userId.slice(0, 12)}...</span>
-                        <strong style={{ color: "#22cf9d", fontSize: "0.9rem" }}>{formatAmount(amount)}</strong>
+                        <strong style={{ color: "#22cf9d", fontSize: "0.9rem" }}>{formatCurrency(amount)}</strong>
                       </li>
                     ))
                   )}
@@ -221,7 +215,7 @@ export default async function AdminActivityPage() {
                             </span>
                           </td>
                           <td style={{ fontFamily: "monospace", fontSize: "0.8rem", opacity: 0.8 }}>{row.userId.slice(0, 8)}</td>
-                          <td style={{ fontWeight: 600 }}>{formatAmount(row.amount)}</td>
+                          <td style={{ fontWeight: 600 }}>{formatCurrency(row.amount)}</td>
                           <td>
                             {row.txHash ? (
                               <a 

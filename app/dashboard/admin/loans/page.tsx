@@ -8,10 +8,7 @@ import {
 } from "@/lib/dashboard/metrics";
 import { getServiceRoleClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
-
-function formatAmount(value: number) {
-  return `${value.toFixed(2)} XLM`;
-}
+import { formatCurrency } from "@/lib/utils/formatting";
 
 export default async function AdminLoansPage() {
   const { user } = await requireTradeVaultAdmin();
@@ -105,7 +102,7 @@ export default async function AdminLoansPage() {
                     <tr key={String(l.id)}>
                       <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.id).slice(0,8)}</td>
                       <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.borrower_id).slice(0,8)}...</td>
-                      <td><strong>{formatAmount(Number(l.principal_amount ?? 0))}</strong></td>
+                      <td><strong>{formatCurrency(Number(l.principal_amount ?? 0))}</strong></td>
                       <td>
                         <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: l.status === "repaid" ? "rgba(155,111,224,0.12)" : "rgba(34,207,157,0.12)", color: l.status === "repaid" ? "#9b6fe0" : "#22cf9d" }}>
                           {String(l.status).toUpperCase()}
@@ -147,7 +144,7 @@ export default async function AdminLoansPage() {
                           <tr key={String(payment.id)}>
                             <td>{String(payment.loan_id).slice(0, 8)}</td>
                             <td>{String(payment.payer_id).slice(0, 8)}</td>
-                            <td>{formatAmount(Number(payment.amount ?? 0))}</td>
+                            <td>{formatCurrency(Number(payment.amount ?? 0))}</td>
                             <td>{payment.paid_at ? new Date(String(payment.paid_at)).toLocaleString() : "-"}</td>
                             <td>
                               {isLikelyTxHash(txHash) ? (

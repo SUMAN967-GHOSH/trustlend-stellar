@@ -6,6 +6,7 @@ import {
   getConnectedWallet,
   signTransactionWithWallet,
 } from "@/lib/stellar/wallet";
+import { formatCurrency } from "@/lib/utils/formatting";
 
 interface PoolOption {
   id: string;
@@ -81,7 +82,7 @@ export function DepositForm({
         {selectedPool && (
           <p className="workspace-hint">
             Pool liquidity:{" "}
-            {Number(selectedPool.available_liquidity ?? 0).toFixed(2)} XLM
+            {formatCurrency(Number(selectedPool.available_liquidity ?? 0))}
           </p>
         )}
       </div>
@@ -113,8 +114,7 @@ export function DepositForm({
               marginTop: "0.3rem",
             }}
           >
-            ⚠️ Amount exceeds your wallet balance of {walletBalance.toFixed(2)}{" "}
-            XLM
+            ⚠️ Amount exceeds your wallet balance of {formatCurrency(walletBalance)}
           </p>
         )}
       </div>
@@ -147,7 +147,7 @@ export function DepositForm({
               Wallet Balance Before
             </p>
             <p style={{ fontWeight: 700, fontSize: "1rem" }}>
-              {walletBalance.toFixed(2)} XLM
+              {formatCurrency(walletBalance)}
             </p>
           </div>
           <span
@@ -174,7 +174,7 @@ export function DepositForm({
                 color: exceedsBalance ? "#ff6b6b" : "#22cf9d",
               }}
             >
-              {balanceAfter.toFixed(2)} XLM
+              {formatCurrency(balanceAfter)}
             </p>
           </div>
         </div>
@@ -218,7 +218,7 @@ export function WithdrawForm({ positions, onSubmit }: WithdrawFormProps) {
       const amountNum = parseFloat(amount);
       if (!amountNum || amountNum <= 0 || amountNum > availableWithdraw) {
         setError(
-          `Amount must be between 1 and ${availableWithdraw.toFixed(2)}`,
+          `Amount must be between 1 and ${formatCurrency(availableWithdraw)}`,
         );
         return;
       }
@@ -256,13 +256,13 @@ export function WithdrawForm({ positions, onSubmit }: WithdrawFormProps) {
           {positions.map((pos) => (
             <option key={pos.id} value={pos.id}>
               Position {String(pos.id).slice(0, 8)} -{" "}
-              {Number(pos.principal_amount ?? 0).toFixed(2)} XLM
+              {formatCurrency(Number(pos.principal_amount ?? 0))}
             </option>
           ))}
         </select>
         {selectedPosition && (
           <p className="workspace-hint">
-            Available: {availableWithdraw.toFixed(2)} XLM
+            Available: {formatCurrency(availableWithdraw)}
           </p>
         )}
       </div>
@@ -532,7 +532,7 @@ export function LenderForms({
             }}
           >
             You deployed{" "}
-            <strong style={{ color: "white" }}>{successTx.amount} XLM</strong>{" "}
+            <strong style={{ color: "white" }}>{formatCurrency(successTx.amount)}</strong>{" "}
             into{" "}
             <strong style={{ color: "white" }}>{successTx.poolName}</strong>.
           </p>
@@ -562,7 +562,7 @@ export function LenderForms({
                 Before
               </p>
               <p style={{ fontWeight: 600, margin: 0 }}>
-                {successTx.balanceBefore.toFixed(2)} XLM
+                {formatCurrency(successTx.balanceBefore)}
               </p>
             </div>
             <span style={{ color: "#22cf9d", fontWeight: 700 }}>→</span>
@@ -577,11 +577,7 @@ export function LenderForms({
                 After
               </p>
               <p style={{ fontWeight: 600, margin: 0, color: "#22cf9d" }}>
-                {Math.max(
-                  0,
-                  successTx.balanceBefore - successTx.amount,
-                ).toFixed(2)}{" "}
-                XLM
+                {formatCurrency(Math.max(0, successTx.balanceBefore - successTx.amount))}
               </p>
             </div>
           </div>
