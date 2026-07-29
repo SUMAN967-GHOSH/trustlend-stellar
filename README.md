@@ -76,40 +76,190 @@ TrustLend is designed as a foundational layer for decentralized, inclusive credi
 
 ## 🏗️ Architecture & Workflow
 
-TrustLend uses a practical hybrid architecture: **fast UX off-chain** (Supabase/Next.js) combined with **trust-critical logic on-chain** (Soroban/Stellar).
+TrustLend uses a practical hybrid architecture: **fast UX off-chain** (Supabase/Next.js) combined with **trust-critical logic on-chain** (Soroban/Stellar). The diagram below maps every component and data flow across all six layers of the platform.
+
+```mermaid
+flowchart TB
+    %% ── Style definitions ────────────────────────────────────────────────────
+    classDef client fill:#3b82f6,color:#fff,stroke:#2563eb,stroke-width:2px
+    classDef backend fill:#8b5cf6,color:#fff,stroke:#7c3aed,stroke-width:2px
+    classDef indexer fill:#06b6d4,color:#fff,stroke:#0891b2,stroke-width:2px
+    classDef automation fill:#f59e0b,color:#1e293b,stroke:#d97706,stroke-width:2px
+    classDef chain fill:#10b981,color:#fff,stroke:#059669,stroke-width:2px
+    classDef external fill:#64748b,color:#fff,stroke:#475569,stroke-width:2px
+
+    %% ── Client Layer (Blue) ──────────────────────────────────────────────────
+    subgraph Client["🖥️ Client Layer"]
+        direction TB
+        WA[("🌐 Web App<br/>Next.js 16 + React 19")]
+        BW[("👛 Browser Wallet<br/>Freighter / xBull / Albedo")]
+        RD[("📱 Role Dashboards<br/>Borrower · Lender · Admin")]
+    end
+
+    %% ── Backend Layer (Purple) ──────────────────────────────────────────────
+    subgraph Backend["⚙️ Backend Layer (Next.js)"]
+        direction TB
+        SA[("📡 Server Actions & API Routes<br/>app/actions + app/api")]
+        SB[("🗄️ Supabase<br/>PostgreSQL · Auth · RLS · Storage")]
+        RM[("🔌 Soroban Client<br/>lib/stellar/soroban.ts")]
+        SC[("🔐 Server-side Contract Invoker<br/>lib/stellar/server-contract.ts")]
+        RC[("⚡ Redis Cache<br/>Simulation result cache")]
+        EM[("📧 Email Service<br/>Resend · Payment notices")]
+    end
+
+    %% ── Indexer Layer (Cyan) ────────────────────────────────────────────────
+    subgraph Indexer["🔍 Indexer Layer (SubQuery)"]
+        direction TB
+        SQ[("📥 SubQuery Soroban Indexer<br/>project.yaml")]
+        GR[("🗃️ GraphQL API<br/>schema.graphql")]
+        RS[("📡 REST API<br/>Read-model fallback")]
+        HM[("📊 Horizon Sync Health<br/>indexer_health table")]
+    end
+
+    %% ── Automation Layer (Amber) ─────────────────────────────────────────────
+    subgraph Automation["⏰ Automation Layer (Cron / Vercel)"]
+        direction TB
+        PD[("📅 Payment-Due Scheduler<br/>lib/scheduler/payment-due.ts<br/>Vercel Cron: hourly")]
+        DM[("⚖️ Default Management<br/>lib/scheduler/default-management.ts<br/>Insurance + Mark Defaulted")]
+        LK[("🔨 Liquidation Keeper<br/>scripts/liquidation-keeper.ts<br/>Under-collateralization monitor")]
+        OC[("📊 Oracle Credit Score Poster<br/>scripts/oracle-post-credit-score.mjs")]
+    end
+
+    %% ── Blockchain Layer (Green) ─────────────────────────────────────────────
+    subgraph Chain["⛓️ Blockchain Layer (Stellar Soroban)"]
+        direction TB
+        LP[("💳 Lending Contract<br/>Loans · Repayments · Flash Loans")]
+        RP[("⭐ Reputation Contract<br/>Borrower scoring · Tiers · Freeze")]
+        ES[("🔒 Escrow Contract<br/>Hold funds · Revocation window")]
+        DF[("🛡️ Default Management<br/>Insurance pool · Phases")]
+        MS[("🏛️ MultiSigAdmin Contract<br/>N-of-M governance · Admin actions")]
+        GV[("🗳️ Governance Contract<br/>Voting · Fee changes · Params")]
+        TR[("💰 Treasury Contract<br/>Fee collection · 50/50 distribution")]
+        AC[("📈 Auto-Compound Vault<br/>Yield auto-compounding · Harvest")]
+    end
+
+    %% ── External / Stellar Layer (Gray) ─────────────────────────────────────
+    subgraph External["🌐 External Services & Infrastructure"]
+        direction TB
+        SR[("🌌 Soroban RPC<br/>soroban-testnet.stellar.org")]
+        HZ[("🔭 Horizon API<br/>horizon-testnet.stellar.org")]
+        WH[("🔔 Webhook<br/>Payment-due notifications")]
+        KP[("🆔 KYC Provider<br/>Document verification")]
+        AL[("📣 Alerts<br/>Slack / Discord")]
+    end
+
+    %% ── Client → Backend ──────────────────────────────────────────────────
+    WA --> SA
+    WA --> RD
+    BW --> WA
+
+    SA --> SB
+    SA --> RM
+    SA --> SC
+
+    %% ── Backend → Stellar RPC (Read = simulate, Write = sign+submit) ─────
+    RM -->|"simulateContractCall (read)"| SR
+    RM -->|"callContract (write)"| SR
+    SC -->|"invokeSigned / invokeReadOnly"| SR
+
+    %% ── Backend internal links ───────────────────────────────────────────────
+    RM --> RC
+    SC --> RC
+    SA --> EM
+    SA --> WH
+
+    %% ── Indexer ──────────────────────────────────────────────────────────────
+    SQ -->|"captures events from"| SR
+    SQ --> GR
+    SQ --> RS
+    GR -->|"GraphQL read-model"| SA
+    RS -->|"REST read-model"| SA
+    HZ -->|"ledger stream"| HM
+    HM -->|"persists sync state"| SB
+    HZ -.->|"also feeds direct reads"| SB
+
+    %% ── Automation ───────────────────────────────────────────────────────────
+    PD -->|"queries due loans"| SB
+    PD --> WH
+    DM -->|"queries overdue loans"| SB
+    DM --> SC
+    DM --> MS
+    LK -->|"checks LTV from"| SR
+    LK --> SB
+    LK --> AL
+    OC -->|"posts credit score to"| RP
+
+    %% ── Chain contracts ─────────────────────────────────────────────────
+    LP <-->|"loan approval"| ES
+    LP <-->|"eligibility check"| RP
+    LP <-->|"governance fee changes"| GV
+    LP <-->|"admin + multisig gating"| MS
+    LP -->|"protocol fees"| TR
+    LP <-->|"auto-compound vault"| AC
+    DF -->|"insurance payout (multisig-gated)"| MS
+    MS -->|"set oracle · whitelist asset · set fee"| RP
+
+    %% ── External ─────────────────────────────────────────────────────────
+    SR <-->|"network consensus"| HZ
+    BW ---|"Freighter signs tx"| SR
+    SB --> KP
+
+    %% ── User labels ──────────────────────────────────────────────────────
+    User1(("👤 Borrower"))
+    User2(("👤 Lender"))
+    User3(("👤 Admin"))
+
+    User1 --> WA
+    User2 --> WA
+    User3 --> WA
+```
+
+### 📖 How to Read the Diagram
+
+| Legend | Meaning |
+|---|---|
+| ➡️ Solid arrow | Direct function call or data flow |
+| 📡 `simulateContractCall` | Read-only Soroban invocation (no fee, no signing) |
+| ✍️ `callContract` / `invokeSigned` | State-changing Soroban transaction (requires signing) |
+| 🔁 `⇄` Double arrow | Bidirectional contract interaction |
+
+### Core User Flow
 
 ```mermaid
 flowchart LR
-   subgraph Client[Client Layer]
-      A1[Web App - Next.js]
-      A2[Freighter Wallet]
-   end
+    O[1. Onboarding] --> B[2. Borrow Request]
+    B --> R{Reputation Check}
+    R -->|Approved| L[3. Lender Funds]
+    L --> E[4. Escrow Hold]
+    E --> D[5. Disbursement]
+    D --> P[6. Repayment]
+    P --> S[Score Updated]
 
-   subgraph Backend[Backend Layer]
-      B0[Server Actions / APIs]
-      B1[Supabase Auth & DB]
-   end
-
-   subgraph Chain[Blockchain Layer - Stellar]
-      C1[Reputation Contract]
-      C2[Escrow Contract]
-      C3[Lending Contract]
-      C4[Default Management]
-   end
-
-   A1 --> B0
-   A1 --> A2
-   B0 --> B1
-   B0 --> C1
-   A2 --> C1
+    style O fill:#3b82f6,color:#fff
+    style B fill:#8b5cf6,color:#fff
+    style R fill:#f59e0b,color:#1e293b
+    style L fill:#10b981,color:#fff
+    style E fill:#06b6d4,color:#fff
+    style D fill:#10b981,color:#fff
+    style P fill:#8b5cf6,color:#fff
+    style S fill:#3b82f6,color:#fff
 ```
 
-### Core User Flow
-1. **Onboarding:** User signs up, connects Freighter Wallet, and completes KYC.
-2. **Borrowing:** Borrower requests a loan. The reputation contract verifies eligibility and limits based on past behavior.
-3. **Lending:** Lender approves/funds the loan, locking funds into the Escrow Contract.
-4. **Disbursement:** Following safety checks, funds are disbursed to the borrower.
-5. **Repayment & Reputation:** On-time repayments boost the borrower's on-chain score. Defaults trigger the Default Management contract to utilize the insurance pool.
+1. **Onboarding:** User signs up via Supabase Auth, connects a Stellar wallet (Freighter / xBull / Albedo), completes KYC verification, and their on-chain reputation profile is initialized.
+2. **Borrowing:** Borrower submits a loan request. The Next.js backend calls `ReputationContract.calculate_max_loan` and `calculate_interest_rate` to determine eligibility and terms.
+3. **Lending:** Lender reviews the request in the marketplace, approves it, and the `LendingContract.approve_loan` is called. Funds are locked via `EscrowContract.create_escrow_hold`.
+4. **Disbursement:** After the 1-hour revocation window expires, the admin confirms disbursement. `EscrowContract.confirm_disbursement` releases funds to the borrower, and `LendingContract.activate_loan` marks the loan as active.
+5. **Repayment:** Borrower repays via the dashboard. The backend calls `LendingContract.record_payment`, which updates the loan balance and emits an event.
+6. **Reputation Update:** On-time repayments trigger `ReputationContract.add_reputation_event`, boosting the borrower's tier and unlocking better terms for future loans. Defaults trigger the `DefaultManagement` contract.
+
+### Automation Flows
+
+| Automation | Trigger | Action |
+|---|---|---|
+| **Payment-Due Scheduler** | Vercel Cron (hourly) | Queries Supabase for loans due within 48h → Sends webhook & email |
+| **Default Management** | Vercel Cron (daily) | Checks overdue loans against ledger time → Marks defaulted on-chain → Proposes insurance payout via MultiSigAdmin (requires N-of-M human approval) |
+| **Liquidation Keeper** | Manual / cron | Monitors LTV ratios against dynamic thresholds → Liquidates under-collateralized positions → Posts Slack/Discord alerts |
+| **Oracle Credit Score** | Manual / cron | Posts verified off-chain credit scores to the Reputation contract |
 
 ---
 
@@ -120,8 +270,13 @@ flowchart LR
 | **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS 4, Framer Motion |
 | **Backend & DB** | Supabase (Auth, Postgres RLS, Storage) |
 | **Blockchain** | Stellar Testnet, Soroban RPC, Horizon API |
-| **Wallet** | Freighter Wallet, `@stellar/freighter-api` |
-| **Smart Contracts** | Rust (Soroban, `wasm32v1-none`) |
+| **Wallet** | Freighter Wallet, xBull, Albedo (`@stellar/freighter-api`, `@creit.tech/stellar-wallets-kit`) |
+| **Smart Contracts** | Rust (Soroban, `wasm32v1-none`)  — 8 contracts deployed |
+| **Indexer** | SubQuery (`@subql/node-stellar`, `@subql/query`) — GraphQL + REST |
+| **Cache** | Upstash Redis |
+| **Automation** | Vercel Cron Jobs |
+| **Email** | Resend |
+| **SEP-24** | Stellar Anchor fiat on/off ramp |
 
 ---
 
@@ -185,6 +340,10 @@ The app will be available at `http://localhost:3000` with hot-reloading enabled.
 | Escrow | `NEXT_PUBLIC_ESCROW_CONTRACT_ID` | `CABTPZ224ISV65LG5M47CPN3HV4QQKL452PQYWPCBKEQHFG4LSSCSYZO` |
 | Lending | `NEXT_PUBLIC_LENDING_CONTRACT_ID` | `CCLVI2JGD7PUV75VHOLTUZF3CVXYBUTOSLKNLHEUUFXOY73BFXUEVEMO` |
 | Default Management | `NEXT_PUBLIC_DEFAULT_CONTRACT_ID` | `CCEMBSRCFFRIZLEN54OQVVLSFJBV5QQ3OW5OIIG2BSA33VFJ3NHDYUKG` |
+| MultiSigAdmin | `NEXT_PUBLIC_MULTISIG_ADMIN_CONTRACT_ID` | *(set at deployment)* |
+| Governance | `NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID` | *(set at deployment)* |
+| Treasury | — | *(set at deployment)* |
+| Auto-Compound Vault | — | *(set at deployment)* |
 
 TrustLend utilizes the standard Soroban `Contract` class flow for integrations (`simulateTransaction`, `assembleTransaction`, etc.). Check `lib/stellar/soroban.ts` for reference.
 </details>
