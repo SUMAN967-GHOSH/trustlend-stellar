@@ -4,6 +4,7 @@ members = [
     "escrow",
     "lending",
     "default_management",
+    "liquidation_auction",
     "governance",
     "multisig_admin",
     "auto_compound_vault",
