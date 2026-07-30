@@ -1868,6 +1868,62 @@ fn test_set_price_oracle() {
     assert_eq!(retrieved, oracle);
 }
 
+/// Median aggregation ignores a manipulated outlier price sample.
+#[test]
+fn test_price_oracle_median_resists_manipulation() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.set_asset_collateral_config(
+        &admin,
+        &asset_a,
+        &AssetCollateralConfig {
+            collateral_factor_bps: 7500,
+            has_price_oracle: true,
+            volatility_bps: 0,
+        },
+    );
+
+    client.deposit_collateral(&borrower, &asset_a, &1_000_0000000);
+
+    client.set_asset_oracle_prices(
+        &admin,
+        &asset_a,
+        &vec![
+            &env,
+            PRICE_PRECISION,
+            PRICE_PRECISION,
+            PRICE_PRECISION * 10,
+        ],
+    );
+
+    let value = client.get_total_collateral_value(&borrower);
+    assert_eq!(value, 1_000_0000000);
+}
+
+/// TWAP is used when live oracle samples are unavailable.
+#[test]
+fn test_price_oracle_twap_fallback_is_used() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.set_asset_collateral_config(
+        &admin,
+        &asset_a,
+        &AssetCollateralConfig {
+            collateral_factor_bps: 7500,
+            has_price_oracle: true,
+            volatility_bps: 0,
+        },
+    );
+
+    client.deposit_collateral(&borrower, &asset_a, &1_000_0000000);
+    client.set_asset_twap_price(&admin, &asset_a, &(PRICE_PRECISION * 2));
+
+    let value = client.get_total_collateral_value(&borrower);
+    assert_eq!(value, 2_000_0000000);
+}
+
 /// Only multisig admin can set the price oracle.
 #[test]
 #[should_panic(expected = "Unauthorised")]
