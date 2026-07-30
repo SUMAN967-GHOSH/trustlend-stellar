@@ -164,6 +164,10 @@ pub enum DataKey {
     UserCollateral(Address),
     /// Price oracle address that can post price feeds for collateral assets.
     PriceOracle,
+    /// Aggregated oracle price samples for a collateral asset.
+    OraclePriceSamples(Address),
+    /// TWAP fallback price for a collateral asset.
+    OracleTwapPrice(Address),
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -585,6 +589,53 @@ impl LendingContract {
             .instance()
             .get(&DataKey::PriceOracle)
             .expect("Price oracle not configured")
+    }
+
+    /// Store multiple oracle price samples for an asset.
+    ///
+    /// Each sample represents a provider quote. The price helper takes the
+    /// median so a single manipulated provider cannot skew valuation.
+    pub fn set_asset_oracle_prices(env: Env, caller: Address, asset: Address, prices: Vec<i128>) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        if prices.is_empty() {
+            panic!("At least one oracle price sample is required");
+        }
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::WhitelistedAsset(asset.clone()))
+        {
+            panic!("Asset is not whitelisted");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::OraclePriceSamples(asset.clone()), &prices);
+    }
+
+    /// Store a TWAP fallback price for an asset.
+    pub fn set_asset_twap_price(env: Env, caller: Address, asset: Address, price: i128) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        if price <= 0 {
+            panic!("TWAP price must be positive");
+        }
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::WhitelistedAsset(asset.clone()))
+        {
+            panic!("Asset is not whitelisted");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleTwapPrice(asset.clone()), &price);
     }
 
     // ── Asset collateral configuration (multisig-gated) ───────────────────────
@@ -1430,17 +1481,80 @@ impl LendingContract {
     /// For now, without a live oracle, all assets are valued at face value (1:1).
     /// This still allows testing the multi-collateral framework with different
     /// collateral factors.
-    fn get_asset_price(_env: &Env, _asset: &Address, config: &AssetCollateralConfig) -> i128 {
+    fn get_asset_price(env: &Env, asset: &Address, config: &AssetCollateralConfig) -> i128 {
         if config.has_price_oracle {
-            // In production, this would read from an oracle price feed.
-            // For now, return a default price of 1.0 (same as face value).
-            // The oracle integration code path will be activated when
-            // the price oracle is configured and posts prices.
-            PRICE_PRECISION
-        } else {
-            // No oracle — face value (1 unit = 1 base unit)
-            PRICE_PRECISION
+            let samples: Vec<i128> = env
+                .storage()
+                .instance()
+                .get(&DataKey::OraclePriceSamples(asset.clone()))
+                .unwrap_or(Vec::new(env));
+
+            if !samples.is_empty() {
+                return Self::median_price(env, &samples);
+            }
+
+            if let Some(twap_price) = env
+                .storage()
+                .instance()
+                .get::<DataKey, i128>(&DataKey::OracleTwapPrice(asset.clone()))
+            {
+                return twap_price;
+            }
         }
+
+        // No oracle or no live price data — fall back to face value.
+        PRICE_PRECISION
+    }
+
+    fn median_price(env: &Env, prices: &Vec<i128>) -> i128 {
+        let len = prices.len();
+        if len == 0 {
+            panic!("No oracle price samples available");
+        }
+
+        let mut remaining = Vec::new(env);
+        for price in prices.iter() {
+            remaining.push_back(price);
+        }
+
+        let midpoint = len / 2;
+        let even = len % 2 == 0;
+        let mut lower = 0i128;
+
+        for step in 0..=midpoint {
+            let mut min_idx: u32 = 0;
+            let mut min_value = remaining.get(0).expect("No oracle price samples available");
+
+            let mut idx: u32 = 1;
+            while idx < remaining.len() {
+                let value = remaining.get(idx).expect("No oracle price samples available");
+                if value < min_value {
+                    min_value = value;
+                    min_idx = idx;
+                }
+                idx += 1;
+            }
+
+            remaining.remove(min_idx);
+
+            if !even && step == midpoint {
+                return min_value;
+            }
+
+            if even {
+                if step == midpoint - 1 {
+                    lower = min_value;
+                }
+                if step == midpoint {
+                    return lower
+                        .checked_add(min_value)
+                        .expect("Overflow computing median price")
+                        / 2;
+                }
+            }
+        }
+
+        panic!("Unable to compute median oracle price")
     }
 
     /// interest = principal × rate_bps × days / (10_000 × 365)
