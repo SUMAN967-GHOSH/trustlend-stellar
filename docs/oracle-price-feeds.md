@@ -150,6 +150,45 @@ Live lookups are disabled automatically under test (`VITEST` / `NODE_ENV=test`)
 and via `LIQUIDATION_USE_LIVE_PRICES=false`, so unit tests never touch a real
 price API.
 
+## Integration with the borrower health factor (issue #323)
+
+The borrower dashboard's health factor gauge valued debt against a hardcoded
+`XLM_PRICE_USD = 0.10`. A health factor computed from a constant reports the
+same number whether XLM is at $0.08 or $0.40, so it could never warn a borrower
+that a position was approaching liquidation.
+
+`lib/dashboard/collateral-pricing.ts` routes that valuation through the same
+feed:
+
+```
+live oracle price  →  cache  →  on-chain TWAP   (lib/oracle/live-prices.ts)
+    ↓ (nothing usable)
+FALLBACK_XLM_PRICE_USD = 0.12  →  matches LIQUIDATION_XLM_PRICE_USD
+```
+
+Both surfaces degrade to the same constant, so the dashboard and the keeper
+never disagree about what a position is worth.
+
+Unlike liquidation, a dashboard must still render when every source is down, so
+the resolver always returns a usable price and reports its provenance instead of
+returning `null`:
+
+| Field | Meaning |
+|---|---|
+| `origin` | `live` / `cache` / `twap` / `unavailable` |
+| `usedFallback` | true when no oracle reading was usable |
+| `isStale` | true for any non-live origin, or a live price past the 120 s window |
+| `label` | human-readable provenance, rendered under the gauge |
+
+The gauge is captioned with the price and its provenance, warning-styled
+whenever `isStale` is set, so a borrower is never shown a stale valuation that
+looks live. Live lookups are skipped under test and via
+`DASHBOARD_USE_LIVE_PRICES=false`.
+
+Collateral remains an assumption (150% of outstanding debt, flagged by
+`collateralIsAssumed`) until per-loan collateral is read from on-chain records —
+that part of the gauge is unchanged by this issue.
+
 ## Wiring it on-chain
 
 The keeper ships with a **dry-run publisher**: it aggregates and logs, but does
