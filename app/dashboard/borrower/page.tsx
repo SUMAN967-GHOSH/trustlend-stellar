@@ -16,6 +16,11 @@ import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButto
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getFundingProgress } from "@/lib/loans/funding";
 import { HealthFactorGauge } from "@/components/dashboard/HealthFactorGauge";
+import {
+  ASSUMED_COLLATERAL_RATIO,
+  computeHealthFactorValuation,
+  fetchDashboardPrice,
+} from "@/lib/dashboard/collateral-pricing";
 import { formatCurrency } from "@/lib/utils/formatting";
 
 // ── Inline SVG illustrations ───────────────────────────────────────────────
@@ -107,19 +112,23 @@ export default async function BorrowerDashboardPage() {
     : 0;
 
   // ── Health Factor computation ──────────────────────────────────────────
-  // Outstanding debt across all active loans (in XLM, converted to an approximate USD value).
-  // Uses a conservative placeholder XLM price; in production this would come from the oracle.
-  const XLM_PRICE_USD = 0.10;
-  const totalDebtXlm = activeLoans.reduce(
-    (sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)),
-    0,
-  ) / 10_000_000;
-  const totalDebtUsd = totalDebtXlm * XLM_PRICE_USD;
-  // Collateral value — approximated as 150% of outstanding debt when active loans exist
-  // (the Soroban lending contract requires over-collateralization at loan creation).
-  // A real implementation would read collateral amounts from on-chain loan records.
-  const totalCollateralUsd = activeLoans.length > 0 ? totalDebtUsd * 1.5 : 0;
-  const showHealthFactor = activeLoans.length > 0 && totalDebtUsd > 0;
+  // Debt is valued at the live oracle price (issue #323), not a hardcoded
+  // constant: a health factor that ignores the market cannot warn a borrower
+  // that their position is approaching liquidation. The feed degrades through
+  // cache → on-chain TWAP → configured fallback, and `xlmPrice.origin` records
+  // which of those the figures below came from.
+  const xlmPrice = await fetchDashboardPrice("XLM");
+  const {
+    totalDebtUsd,
+    totalCollateralUsd,
+    showHealthFactor,
+    collateralIsAssumed,
+  } = computeHealthFactorValuation({
+    outstandingStroops: activeLoans.map(
+      (l) => Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0),
+    ),
+    price: xlmPrice,
+  });
 
   const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
     if (s === "requested")                    return "yellow";
@@ -228,12 +237,35 @@ export default async function BorrowerDashboardPage() {
 
         {/* ── Health Factor Gauge ── */}
         {showHealthFactor && (
-          <HealthFactorGauge
-            collateralValueUsd={totalCollateralUsd}
-            debtValueUsd={totalDebtUsd}
-            collateralAssetSymbol="USD"
-            debtAssetSymbol="XLM"
-          />
+          <>
+            <HealthFactorGauge
+              collateralValueUsd={totalCollateralUsd}
+              debtValueUsd={totalDebtUsd}
+              collateralAssetSymbol="USD"
+              debtAssetSymbol="XLM"
+            />
+
+            {/* Price provenance — a health factor is only as trustworthy as the
+                price behind it, so say where that price came from (#323). */}
+            <p
+              className={`borrower-price-source${
+                xlmPrice.isStale ? " borrower-price-source--stale" : ""
+              }`}
+            >
+              <span aria-hidden="true">{xlmPrice.isStale ? "⚠️" : "🟢"}</span>
+              <span>
+                Valued at <strong>${xlmPrice.priceUsd.toFixed(4)}</strong> per XLM —{" "}
+                {xlmPrice.label}.
+                {collateralIsAssumed && (
+                  <>
+                    {" "}
+                    Collateral is estimated at {ASSUMED_COLLATERAL_RATIO * 100}% of outstanding
+                    debt pending on-chain collateral records.
+                  </>
+                )}
+              </span>
+            </p>
+          </>
         )}
 
         {/* ── Loan Cards ── */}

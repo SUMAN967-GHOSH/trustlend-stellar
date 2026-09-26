@@ -6,7 +6,7 @@ import { getDb } from "@/lib/db/client";
 import { ledgerTransactions, lendingPools, loans, profiles, reputationSnapshots } from "@/lib/db/schema";
 import { requireKycVerified } from "@/lib/kyc/middleware";
 import { verifyOnchainLoanRequest } from "@/lib/loans/onchain";
-import { getPlatformFeeBps } from "@/lib/platform/settings";
+import { getActiveRateConfig, isRateModel, priceLoanApr } from "@/lib/loans/rate-config";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -17,6 +17,12 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
  * `preflight: true` runs every validation (KYC, limits, one-active-loan,
  * credit limit) and returns the APR without creating anything, so the client
  * can check eligibility before asking the wallet to sign the on-chain request.
+ *
+ * APRs come from the admin-managed schedule in `interest_rate_configs`
+ * (lib/loans/rate-config.ts), not from hardcoded ladders — admins retune rates
+ * from /dashboard/admin/rates without a deployment. The schedule version used
+ * for the quote is stamped into `loans.metadata.rate_config_version` so a later
+ * publish cannot retroactively reprice a loan already in flight.
  *
  * When the on-chain lifecycle is enabled (NEXT_PUBLIC_ONCHAIN_LOAN_LIFECYCLE,
  * see lib/stellar/onchain-lifecycle.ts) the borrower must first sign
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const amount: number = body.amount;
     const durationDays: number = body.durationDays ?? body.duration_days;
-    const rateModel: string = (body.rateModel ?? body.rate_model ?? "fixed").toLowerCase();
+    const rateModel: unknown = String(body.rateModel ?? body.rate_model ?? "fixed").toLowerCase();
     const onchainLoanId: unknown = body.onchainLoanId ?? body.onchain_loan_id;
     const onchainTxHash: unknown = body.onchainTxHash ?? body.onchain_tx_hash;
     const walletAddress: unknown = body.walletAddress ?? body.wallet_address;
@@ -73,7 +79,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!["fixed", "floating"].includes(rateModel)) {
+    if (!isRateModel(rateModel)) {
       return NextResponse.json(
         { error: `Invalid rate model: must be 'fixed' or 'floating'` },
         { status: 400 }
@@ -116,23 +122,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── 3. Calculate APR ─────────────────────────────────────────────────────────
-    let aprBps: number;
-    if (rateModel === "floating") {
-      // Floating rate: base 5% + utilization slope
-      // Start lower than fixed — the rate will be updated dynamically
-      aprBps = 500; // 5% base floating rate
-      if (amount > 2000) aprBps = 400;
-      else if (amount > 1000) aprBps = 450;
-    } else {
-      // Fixed rate: locked at creation (traditional tiered model)
-      aprBps = 1500; // 15% default
-      if (amount > 2000) aprBps = 1000;       // 10%
-      else if (amount > 1000) aprBps = 1200;  // 12%
-    }
+    // ── 3. Quote the APR from the admin-managed schedule ─────────────────────
+    // Fixed-rate quotes are locked into loans.apr_bps at creation; floating
+    // loans start here and are recomputed later against whatever schedule is
+    // active at that point.
+    const { config: rateConfig, usedFallback } = await getActiveRateConfig(db, rateModel);
+    const quote = priceLoanApr(rateConfig, { amount, reputationScore, usedFallback });
+    const aprBps = quote.aprBps;
 
     if (preflight) {
-      return NextResponse.json({ ok: true, aprBps, rateModel, maxLoan, reputationScore }, { status: 200 });
+      return NextResponse.json(
+        {
+          ok: true,
+          aprBps,
+          rateModel,
+          maxLoan,
+          reputationScore,
+          rateConfigVersion: quote.configVersion,
+          rateBreakdown: {
+            tierAprBps: quote.tierAprBps,
+            reputationMultiplierBps: quote.reputationMultiplierBps,
+            matchedAmountTier: quote.matchedAmountTier,
+          },
+        },
+        { status: 200 }
+      );
     }
 
     // The platform fee in force right now. Stamped into the loan below so it
@@ -195,10 +209,16 @@ export async function POST(request: NextRequest) {
         status: "requested",
         metadata: {
           rate_model: rateModel,
-          // Lock the platform fee at origination (issue #324) so a later
-          // admin change cannot increase what this borrower owes.
-          platform_fee_bps: originationFee.valueBps,
-          platform_fee_version: originationFee.version,
+          // Pins the loan to the schedule it was quoted under, so publishing a
+          // new one never retroactively reprices this loan (issue #321).
+          rate_config_version: quote.configVersion,
+          rate_quote: {
+            tier_apr_bps: quote.tierAprBps,
+            reputation_multiplier_bps: quote.reputationMultiplierBps,
+            matched_amount_tier: quote.matchedAmountTier,
+            clamped: quote.clamped,
+            used_fallback: quote.usedFallback,
+          },
           ...onchain.metadata,
         },
       })
@@ -220,6 +240,7 @@ export async function POST(request: NextRequest) {
           durationDays: Number(durationDays),
           aprBps,
           rateModel,
+          rateConfigVersion: quote.configVersion,
           fundingPath: poolId ? "pool" : "direct",
           onchainLoanId: onchain.metadata.onchain_loan_id ?? null,
           onchainTxHash: onchain.metadata.onchain_request_tx ?? null,
@@ -245,6 +266,7 @@ export async function POST(request: NextRequest) {
       {
         loan,
         rateModel,
+        rateConfigVersion: quote.configVersion,
         onchain: onchain.metadata,
         fundingPath: poolId ? "pool" : "direct",
         message: poolId

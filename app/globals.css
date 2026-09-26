@@ -1873,6 +1873,37 @@
     background: var(--primary-hover);
   }
 
+  /* Price provenance under the health factor gauge (issue #323) */
+  .borrower-price-source {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin: -0.25rem 0 0;
+    padding: 0.55rem 0.85rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+
+  .borrower-price-source strong {
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A stale or fallback price must not read as a live market quote. */
+  .borrower-price-source--stale {
+    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    color: var(--warning-soft-fg);
+  }
+
+  .borrower-price-source--stale strong {
+    color: var(--warning-soft-fg);
+  }
+
   .borrower-empty-state {
     position: relative;
     overflow: hidden;
@@ -2134,5 +2165,378 @@
     height: 1px;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
+  }
+
+  /* ─── Lender Earnings Estimator (issue #322) ──────────────────────────── */
+
+  .lender-estimator {
+    border-radius: 1rem;
+    padding: 1.75rem;
+    /* Glassmorphism: translucent gradient + blur, so the card lifts off the
+       dashboard background in both themes. */
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--surface) 86%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 100%
+    );
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 32px color-mix(in srgb, var(--fg) 8%, transparent);
+  }
+
+  .lender-estimator__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+  }
+
+  .lender-estimator__title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin: 0;
+    color: var(--fg);
+  }
+
+  .lender-estimator__subtitle {
+    font-size: 0.84rem;
+    color: var(--fg-muted);
+    margin: 0.3rem 0 0;
+    max-width: 46ch;
+    line-height: 1.5;
+  }
+
+  .lender-estimator__badge {
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .lender-estimator__body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.75rem;
+  }
+
+  @media (max-width: 860px) {
+    .lender-estimator__body {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .lender-estimator__controls,
+  .lender-estimator__results {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .lender-estimator__field {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .lender-estimator__field-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .lender-estimator__label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--fg);
+  }
+
+  .lender-estimator__value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lender-estimator__value-sub {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--fg-subtle);
+  }
+
+  .lender-estimator__amount-input {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 0.55rem;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+  }
+
+  .lender-estimator__number {
+    width: 6.5rem;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font-size: 0.92rem;
+    font-weight: 700;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+    /* Spinners would collide with the slider as a second control. */
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  .lender-estimator__number::-webkit-outer-spin-button,
+  .lender-estimator__number::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .lender-estimator__unit {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--fg-subtle);
+  }
+
+  /* Range sliders — filled track up to the thumb via the --fill custom prop. */
+  .lender-estimator__slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--fill, 0%),
+      color-mix(in srgb, var(--fg-muted) 20%, transparent) var(--fill, 0%),
+      color-mix(in srgb, var(--fg-muted) 20%, transparent) 100%
+    );
+    outline: none;
+    cursor: pointer;
+  }
+
+  .lender-estimator__slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--surface);
+    cursor: pointer;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .lender-estimator__slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  .lender-estimator__slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  .lender-estimator__slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--surface);
+    cursor: pointer;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  .lender-estimator__scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--fg-subtle);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Tier toggle group */
+  .lender-estimator__tiers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+  }
+
+  @media (max-width: 520px) {
+    .lender-estimator__tiers {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .lender-estimator__tier {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.6rem 0.4rem;
+    border-radius: 0.65rem;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    color: var(--fg-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+      transform 0.15s ease,
+      border-color 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .lender-estimator__tier:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+  }
+
+  .lender-estimator__tier--active {
+    /* Inline styles supply the per-tier colour; this carries the shared lift. */
+    font-weight: 800;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--fg) 8%, transparent);
+  }
+
+  .lender-estimator__tier-mult {
+    font-size: 0.68rem;
+    font-weight: 600;
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lender-estimator__tier-blurb {
+    font-size: 0.76rem;
+    color: var(--fg-subtle);
+    margin: 0;
+    min-height: 1.1rem;
+  }
+
+  /* Result cards */
+  .lender-estimator__result {
+    padding: 1rem 1.15rem;
+    border-radius: 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  .lender-estimator__result--primary {
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 14%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 100%
+    );
+  }
+
+  .lender-estimator__result-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+
+  .lender-estimator__result-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--accent);
+    margin: 0.25rem 0 0;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lender-estimator__result-hint {
+    font-size: 0.72rem;
+    color: var(--fg-subtle);
+    margin: 0.2rem 0 0;
+  }
+
+  /* Breakdown list */
+  .lender-estimator__breakdown {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0.9rem 1.15rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+    font-size: 0.8rem;
+  }
+
+  .lender-estimator__breakdown > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .lender-estimator__breakdown dt {
+    color: var(--fg-muted);
+  }
+
+  .lender-estimator__breakdown dd {
+    margin: 0;
+    font-weight: 700;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lender-estimator__breakdown-fee {
+    color: var(--danger) !important;
+  }
+
+  .lender-estimator__breakdown-gain {
+    color: var(--accent) !important;
+  }
+
+  .lender-estimator__breakdown-total {
+    margin-top: 0.3rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .lender-estimator__breakdown-total dt {
+    font-weight: 700;
+    color: var(--fg) !important;
+  }
+
+  .lender-estimator__breakdown-total dd {
+    color: var(--accent) !important;
+    font-size: 0.95rem;
+  }
+
+  .lender-estimator__disclaimer {
+    font-size: 0.7rem;
+    color: var(--fg-subtle);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lender-estimator__tier,
+    .lender-estimator__slider::-webkit-slider-thumb {
+      transition: none;
+    }
+
+    .lender-estimator__tier:hover {
+      transform: none;
+    }
   }
 }

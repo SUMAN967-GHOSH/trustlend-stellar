@@ -15,10 +15,12 @@
    - [Fixed Rate](#32-fixed-rate)
    - [Floating Rate (Utilization Curve)](#33-floating-rate-utilization-curve)
    - [Floating Rate Recalculation](#34-floating-rate-recalculation-on-chain)
+   - [Admin-Managed Origination Schedule](#35-admin-managed-origination-schedule-issue-321)
 4. [Pool Utilization Rate](#4-pool-utilization-rate)
 5. [Reputation Tier Multipliers](#5-reputation-tier-multipliers)
 6. [Rate Model Switching](#6-rate-model-switching)
 7. [Platform Fee](#7-platform-fee)
+   - [Lender Earnings Estimator](#71-lender-earnings-estimator-issue-322)
 8. [Flash Loan Fee](#8-flash-loan-fee)
 9. [Liquidation Threshold](#9-liquidation-threshold)
 10. [Oracle Credit Score Boost](#10-oracle-credit-score-boost)
@@ -84,6 +86,7 @@ It is critical to understand the two-layer architecture:
 | Layer | What it does | File(s) |
 |---|---|---|
 | **On-chain (Contract)** | Stores the `interest_rate_bps` parameter verbatim. For new Fixed-rate loans, the rate passed in is the **reputation tier rate** fetched from the Reputation contract. The lending contract does **not** compute any blended or curve-adjusted rate on-chain. | `contracts/lending/src/lib.rs` (`create_loan_request`), `contracts/borrower_reputation/src/lib.rs` (`calculate_interest_rate`) |
+| **Origination (API)** | Computes the **binding** APR written to `loans.apr_bps`, from the admin-managed schedule described in [§3.5](#35-admin-managed-origination-schedule-issue-321). This is the rate the borrower actually pays. | `lib/loans/rate-config.ts`, `app/api/loans/apply/route.ts` |
 | **Frontend (Dashboard)** | Computes **suggested/display** rates using the utilization curve and fixed premium. These are guidance values shown in the UI to help borrowers decide. | `lib/dashboard/interest-rates.ts` (`computeFixedRate`, `computeFloatingRate`) |
 
 ### 3.2 Fixed Rate
@@ -213,6 +216,41 @@ loan.interest_rate_bps = new_rate_bps;
 loan.last_rate_update = now;
 ```
 
+### 3.5 Admin-Managed Origination Schedule (issue #321)
+
+The APR written to `loans.apr_bps` at application time comes from the
+`interest_rate_configs` table, not from constants in the route handler. Admins
+retune rates at **/dashboard/admin/rates** without a deployment.
+
+There is one **active** row per rate model. Rows are append-only and versioned:
+publishing deactivates the previous row and inserts the next version, so the
+exact numbers any loan was priced against stay readable.
+
+**Resolution order** (`lib/loans/rate-config.ts` — `priceLoanApr`):
+
+$$R_{\text{origination}} = \text{clamp}\Big(\Big\lfloor \frac{R_{\text{tier}} \times M_{\text{rep}}}{10000} \Big\rceil,\; R_{\text{min}},\; R_{\text{max}}\Big)$$
+
+| Symbol | Source | Description |
+|---|---|---|
+| $R_{\text{tier}}$ | `amount_tiers` | APR of the **highest** `minAmount` the principal reaches (`amount >= minAmount`); falls back to `base_apr_bps` when no tier matches |
+| $M_{\text{rep}}$ | `reputation_tiers` | Multiplier in bps of the **highest** `minScore` the borrower's trust score reaches; `10000` = $1.00\times$, so `9000` is a $10\%$ discount. Defaults to `10000` when no tier matches |
+| $R_{\text{min}}$, $R_{\text{max}}$ | `min_apr_bps`, `max_apr_bps` | Hard clamps applied last |
+
+**Retroactivity.** Every loan records the schedule version it was quoted under
+in `loans.metadata.rate_config_version`, alongside the `apr_bps` column written
+once at creation. Publishing a new schedule therefore **never** reprices a
+pending or active fixed-rate loan. Floating-rate loans track the live schedule
+by design and are repriced on their next recalculation ([§3.4](#34-floating-rate-recalculation-on-chain)).
+
+**Degradation.** When the table is unreachable or unseeded, origination falls
+back to `DEFAULT_RATE_CONFIGS`, which reproduces the pre-#321 hardcoded ladder
+exactly (including its strict `amount > 1000` boundaries). Fallback quotes carry
+version `0`, and the admin dashboard warns when it is in effect.
+
+**Safety bounds** (`RATE_CONFIG_BOUNDS`): APRs $[0\%, 100\%]$, multipliers
+$[0.10\times, 3.00\times]$, at most 10 tiers per ladder, and a rationale of at
+least 5 characters recorded with every publish.
+
 ---
 
 ## 4. Pool Utilization Rate
@@ -335,6 +373,50 @@ $$F_{\text{platform}} = \frac{I \times F_{\text{protocol}}}{10,\!000}$$
 The fee is collected at loan creation and stored as `UncollectedFees`. It can be swept to the Treasury contract by calling `collect_fees()`.
 
 The platform fee rate can only be changed by a successful DAO governance vote — there is no admin override path.
+
+### 7.1 Lender Earnings Estimator (issue #322)
+
+The lender pools dashboard carries a forecasting tool
+(`lib/dashboard/lender-earnings.ts`, rendered by
+`components/dashboard/LenderEarningsEstimator.tsx`) that models what a deposit
+would earn before the lender commits capital. These are **projections for
+display**, not quotes — nothing here is written to a position.
+
+$$I_{\text{lender}} = D \times \frac{R_{\text{pool}}}{10,\!000} \times \frac{T}{365} \times M_{\text{tier}}$$
+
+$$N = I_{\text{lender}} - \frac{I_{\text{lender}} \times F_{\text{protocol}}}{10,\!000}
+\qquad
+P_{\text{rep}} = D \times 0.01 \times \frac{T}{30} \times M_{\text{tier}}$$
+
+| Symbol | Range | Description |
+|---|---|---|
+| $D$ | `100`–`100,000` XLM | Deposit amount (slider) |
+| $T$ | `30`–`365` days | Lock-up duration (slider) |
+| $R_{\text{pool}}$ | varies | Best active pool APR in bps; falls back to `1000` bps ($10\%$) |
+| $M_{\text{tier}}$ | $1.0$–$1.5$ | Target borrower tier multiplier |
+| $N$ | — | Net expected rewards, after the $1\%$ platform fee |
+| $P_{\text{rep}}$ | — | Reputation points gained, rounded to a whole number |
+
+**Tier economics.** Lending to better-rated borrowers earns more, since that
+capital is matched at higher effective rates and repaid reliably:
+
+| Tier | Multiplier | Rate adjustment |
+|---|---|---|
+| Bronze | $1.00\times$ | base APR |
+| Silver | $1.10\times$ | $+5\%$ |
+| Gold | $1.25\times$ | $+10\%$ |
+| Platinum | $1.50\times$ | $+15\%$ |
+
+These are the four tiers named in the issue. The platform's own scoring ladder
+([§5](#5-reputation-tier-multipliers)) runs None/Beginner/Silver/Gold/Platinum —
+"Bronze" is the entry band below Silver and carries the neutral $1.0\times$
+multiplier, so the two ladders agree wherever they overlap.
+
+The headline **Dynamic Yield (APR)** is derived back out of $I_{\text{lender}}$
+rather than computed separately, so the percentage shown can never drift from
+the reward figure beside it. Inputs are clamped to the slider ranges and a
+non-positive pool APR falls back to the default, so the forecast is never
+negative or `NaN`.
 
 ---
 
