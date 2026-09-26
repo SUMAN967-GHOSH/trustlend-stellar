@@ -19,6 +19,7 @@
 5. [Reputation Tier Multipliers](#5-reputation-tier-multipliers)
 6. [Rate Model Switching](#6-rate-model-switching)
 7. [Platform Fee](#7-platform-fee)
+   - [Lender Earnings Estimator](#71-lender-earnings-estimator-issue-322)
 8. [Flash Loan Fee](#8-flash-loan-fee)
 9. [Liquidation Threshold](#9-liquidation-threshold)
 10. [Oracle Credit Score Boost](#10-oracle-credit-score-boost)
@@ -335,6 +336,50 @@ $$F_{\text{platform}} = \frac{I \times F_{\text{protocol}}}{10,\!000}$$
 The fee is collected at loan creation and stored as `UncollectedFees`. It can be swept to the Treasury contract by calling `collect_fees()`.
 
 The platform fee rate can only be changed by a successful DAO governance vote — there is no admin override path.
+
+### 7.1 Lender Earnings Estimator (issue #322)
+
+The lender pools dashboard carries a forecasting tool
+(`lib/dashboard/lender-earnings.ts`, rendered by
+`components/dashboard/LenderEarningsEstimator.tsx`) that models what a deposit
+would earn before the lender commits capital. These are **projections for
+display**, not quotes — nothing here is written to a position.
+
+$$I_{\text{lender}} = D \times \frac{R_{\text{pool}}}{10,\!000} \times \frac{T}{365} \times M_{\text{tier}}$$
+
+$$N = I_{\text{lender}} - \frac{I_{\text{lender}} \times F_{\text{protocol}}}{10,\!000}
+\qquad
+P_{\text{rep}} = D \times 0.01 \times \frac{T}{30} \times M_{\text{tier}}$$
+
+| Symbol | Range | Description |
+|---|---|---|
+| $D$ | `100`–`100,000` XLM | Deposit amount (slider) |
+| $T$ | `30`–`365` days | Lock-up duration (slider) |
+| $R_{\text{pool}}$ | varies | Best active pool APR in bps; falls back to `1000` bps ($10\%$) |
+| $M_{\text{tier}}$ | $1.0$–$1.5$ | Target borrower tier multiplier |
+| $N$ | — | Net expected rewards, after the $1\%$ platform fee |
+| $P_{\text{rep}}$ | — | Reputation points gained, rounded to a whole number |
+
+**Tier economics.** Lending to better-rated borrowers earns more, since that
+capital is matched at higher effective rates and repaid reliably:
+
+| Tier | Multiplier | Rate adjustment |
+|---|---|---|
+| Bronze | $1.00\times$ | base APR |
+| Silver | $1.10\times$ | $+5\%$ |
+| Gold | $1.25\times$ | $+10\%$ |
+| Platinum | $1.50\times$ | $+15\%$ |
+
+These are the four tiers named in the issue. The platform's own scoring ladder
+([§5](#5-reputation-tier-multipliers)) runs None/Beginner/Silver/Gold/Platinum —
+"Bronze" is the entry band below Silver and carries the neutral $1.0\times$
+multiplier, so the two ladders agree wherever they overlap.
+
+The headline **Dynamic Yield (APR)** is derived back out of $I_{\text{lender}}$
+rather than computed separately, so the percentage shown can never drift from
+the reward figure beside it. Inputs are clamped to the slider ranges and a
+non-positive pool APR falls back to the default, so the forecast is never
+negative or `NaN`.
 
 ---
 

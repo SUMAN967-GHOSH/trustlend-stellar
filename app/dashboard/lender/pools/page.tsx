@@ -1,6 +1,8 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { LenderForms } from "@/components/dashboard/LenderForms";
 import { InteractiveLineChart } from "@/components/dashboard/InteractiveLineChart";
+import { LenderEarningsEstimator } from "@/components/dashboard/LenderEarningsEstimator";
+import { selectEstimatorAprBps } from "@/lib/dashboard/lender-earnings";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import {
   getLenderDashboardMetrics,
@@ -59,6 +61,16 @@ export default async function LenderPoolsPage() {
     (s, p) => s + Number(p.earned_interest ?? 0),
     0,
   );
+
+  // Seed the earnings estimator with the best active pool rate — the one a new
+  // deposit would realistically target (issue #322).
+  const estimatorAprBps = selectEstimatorAprBps(pools);
+  const estimatorPoolName =
+    pools.find(
+      (p) =>
+        String(p.status ?? "") === "active" &&
+        Number(p.apr_bps ?? 0) === estimatorAprBps,
+    )?.name ?? null;
 
   // Fetch live XLM balance from Stellar Horizon (server-side, best-effort)
   let availableWalletBalance = 0;
@@ -251,32 +263,12 @@ export default async function LenderPoolsPage() {
           </article>
         </section>
 
-        {/* TODO (Lender Earnings Calculator Integration):
-            1. Interactive APR Calculator Component Design:
-               - Implement a component container matching the modern dark mode and glassmorphism styling of the dashboard (using `workspace-card` or similar CSS class).
-               - Add header: "Lender Earnings Estimator".
-            2. Sliders for Input Adjustments:
-               - Deposit Amount (in XLM): Add a range input slider from 100 XLM to 100,000 XLM with a dynamic number input to show the current value.
-               - Lock-up Duration (in days): Add a range input slider from 30 days to 365 days with a text label displaying selected days.
-            3. Borrower Reputation Tier Toggles:
-               - Add group of toggle buttons (Bronze, Silver, Gold, Platinum) to represent the target borrower credit/reputation tier.
-               - Based on selected tier, adjust the base APR multiplier or reputation point factor used in the dynamic yield calculation:
-                 * Bronze: 1.0x multiplier, base APR
-                 * Silver: 1.1x multiplier, +5% dynamic rate adjustment
-                 * Gold: 1.25x multiplier, +10% dynamic rate adjustment
-                 * Platinum: 1.5x multiplier, +15% dynamic rate adjustment
-            4. Dynamic Computations & Yields:
-               - Interest Yield = (Deposit Amount * (Pool APR / 10000) * (Duration Days / 365)) * Tier Multiplier
-               - Platform Fee = Interest Yield * 0.01 (1% platform fee)
-               - Net Expected Rewards = Interest Yield - Platform Fee
-               - Expected Reputation Point Gains = (Deposit Amount * 0.01) * (Duration Days / 30) * Tier Multiplier
-            5. UI Layout & Visuals:
-               - Left column: Sliders for Deposit Amount and Lock-up Duration, and Toggle group for Borrower Reputation Tiers.
-               - Right column: Clean, green-highlighted summary cards displaying:
-                 * "Net Expected Rewards": e.g., "1,245.50 XLM"
-                 * "Dynamic Yield (APR)": e.g., "12.45%"
-                 * "Reputation Points Gained": e.g., "+350 pts"
-        */}
+        {/* ── Earnings estimator (issue #322) ───────────────────── */}
+        <LenderEarningsEstimator
+          poolAprBps={estimatorAprBps}
+          poolName={estimatorPoolName}
+          initialDepositXlm={availableWalletBalance}
+        />
 
         {/* ── My positions summary ──────────────────────────────── */}
         <section className="workspace-grid workspace-grid--two">
