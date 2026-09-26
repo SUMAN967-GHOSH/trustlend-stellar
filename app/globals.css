@@ -1873,6 +1873,37 @@
     background: var(--primary-hover);
   }
 
+  /* Price provenance under the health factor gauge (issue #323) */
+  .borrower-price-source {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin: -0.25rem 0 0;
+    padding: 0.55rem 0.85rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+
+  .borrower-price-source strong {
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A stale or fallback price must not read as a live market quote. */
+  .borrower-price-source--stale {
+    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    color: var(--warning-soft-fg);
+  }
+
+  .borrower-price-source--stale strong {
+    color: var(--warning-soft-fg);
+  }
+
   .borrower-empty-state {
     position: relative;
     overflow: hidden;
