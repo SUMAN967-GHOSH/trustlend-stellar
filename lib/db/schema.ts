@@ -348,6 +348,55 @@ export const loanFundings = pgTable(
   ],
 );
 
+// ─── Platform settings (issue #324) ───────────────────────────────────────────
+
+/**
+ * Admin-tunable platform-wide financial parameters, one active row per key.
+ *
+ * Replaces hardcoded constants like the 1% platform fee that used to live in
+ * app/api/loans/repay/route.ts, so governance can retune them without a
+ * deployment.
+ *
+ * Rows are append-only and versioned in the same way as
+ * `interest_rate_configs` (issue #321): publishing a new value deactivates the
+ * previous row rather than mutating it. That matters because these values are
+ * charged to borrowers — a loan records the fee it was originated under in
+ * `loans.metadata.platform_fee_bps`, so raising the fee can never retroactively
+ * increase the debt on a loan already in flight.
+ *
+ * `valueBps` holds the value in basis points (100 = 1.00%), which is how every
+ * financial parameter in this codebase is expressed. See
+ * lib/platform/settings.ts for the known keys and their bounds.
+ */
+export const platformSettings = pgTable(
+  "platform_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Setting identifier, e.g. "platform_fee_bps". */
+    settingKey: text("setting_key").notNull(),
+    /** Monotonically increasing per key; charged loans record this. */
+    version: integer("version").notNull().default(1),
+    /** Only one row per key may be active at a time. */
+    isActive: boolean("is_active").notNull().default(true),
+    /** The value, in basis points. */
+    valueBps: integer("value_bps").notNull(),
+    /** Why this value was published — shown in the admin audit trail. */
+    notes: text("notes"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    /** Email captured at publish time so history survives user deletion. */
+    updatedByEmail: text("updated_by_email"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_settings_key_version_key").on(t.settingKey, t.version),
+    uniqueIndex("platform_settings_active_key")
+      .on(t.settingKey)
+      .where(sql`${t.isActive}`),
+    index("idx_platform_settings_key_created_at").on(t.settingKey, t.createdAt),
+  ],
+);
+
 // ─── Risk and fraud ───────────────────────────────────────────────────────────
 
 export const riskAssessments = pgTable(
@@ -604,3 +653,4 @@ export type Referral = typeof referrals.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type FraudSignal = typeof fraudSignals.$inferSelect;
 export type RiskAssessment = typeof riskAssessments.$inferSelect;
+export type PlatformSettingRow = typeof platformSettings.$inferSelect;

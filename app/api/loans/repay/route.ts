@@ -7,6 +7,7 @@ import { ledgerTransactions, loanRepayments, loans, profiles, reputationEvents }
 import { getLoanLenders } from "@/lib/loans/lenders";
 import { splitRepaymentAcrossLenders } from "@/lib/loans/funding";
 import { recordRepaymentOnchain } from "@/lib/loans/onchain";
+import { getPlatformFeeBps, resolveLoanFeeBps } from "@/lib/platform/settings";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
@@ -166,7 +167,17 @@ export async function POST(request: NextRequest) {
     const durationDays = Number(loan.duration_days ?? 30);
     const aprBps       = Number(loan.apr_bps ?? 0);
     const totalInterest= principal * (aprBps / 10000) * (durationDays / 365);
-    const platformFee  = principal * 0.01;
+    // The platform fee is admin-configurable (issue #324) but locked per loan:
+    // `resolveLoanFeeBps` prefers the rate stamped at origination, so raising
+    // the fee never increases what an outstanding loan owes. Only loans created
+    // before that stamp existed fall through to the live setting.
+    const activeFeeSetting = await getPlatformFeeBps(db);
+    const resolvedFee  = resolveLoanFeeBps({
+      principal,
+      loanMetadata: loan.metadata,
+      activeSetting: activeFeeSetting,
+    });
+    const platformFee  = resolvedFee.feeAmount;
     const totalDue     = principal + totalInterest + platformFee;
 
     let newStatus = loan.status === "funded" ? "active" : loan.status;
@@ -221,6 +232,12 @@ export async function POST(request: NextRequest) {
         principalAmount: loan.principal_amount,
         repaidSoFar: newRepaidAmount,
         repaidAt: new Date().toISOString(),
+        // Which fee was charged and where it came from, so a borrower dispute
+        // can be settled from the ledger alone (issue #324).
+        platformFeeBps: resolvedFee.feeBps,
+        platformFeeAmount: platformFee,
+        platformFeeSource: resolvedFee.source,
+        platformFeeVersion: resolvedFee.version,
       },
     });
 

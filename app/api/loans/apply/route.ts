@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db/client";
 import { ledgerTransactions, lendingPools, loans, profiles, reputationSnapshots } from "@/lib/db/schema";
 import { requireKycVerified } from "@/lib/kyc/middleware";
 import { verifyOnchainLoanRequest } from "@/lib/loans/onchain";
+import { getPlatformFeeBps } from "@/lib/platform/settings";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -134,6 +135,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, aprBps, rateModel, maxLoan, reputationScore }, { status: 200 });
     }
 
+    // The platform fee in force right now. Stamped into the loan below so it
+    // stays fixed for this borrower even if an admin changes it later (#324).
+    const originationFee = await getPlatformFeeBps(db);
+
     // ── 3b. Verify the on-chain loan request (mandatory when enabled) ────────
     const [borrowerProfile] = await db
       .select({ walletAddress: profiles.walletAddress })
@@ -188,7 +193,14 @@ export async function POST(request: NextRequest) {
         durationDays: Number(durationDays),
         rateModel,
         status: "requested",
-        metadata: { rate_model: rateModel, ...onchain.metadata },
+        metadata: {
+          rate_model: rateModel,
+          // Lock the platform fee at origination (issue #324) so a later
+          // admin change cannot increase what this borrower owes.
+          platform_fee_bps: originationFee.valueBps,
+          platform_fee_version: originationFee.version,
+          ...onchain.metadata,
+        },
       })
       .returning();
 
