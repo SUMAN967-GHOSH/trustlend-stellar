@@ -15,6 +15,7 @@
    - [Fixed Rate](#32-fixed-rate)
    - [Floating Rate (Utilization Curve)](#33-floating-rate-utilization-curve)
    - [Floating Rate Recalculation](#34-floating-rate-recalculation-on-chain)
+   - [Admin-Managed Origination Schedule](#35-admin-managed-origination-schedule-issue-321)
 4. [Pool Utilization Rate](#4-pool-utilization-rate)
 5. [Reputation Tier Multipliers](#5-reputation-tier-multipliers)
 6. [Rate Model Switching](#6-rate-model-switching)
@@ -84,6 +85,7 @@ It is critical to understand the two-layer architecture:
 | Layer | What it does | File(s) |
 |---|---|---|
 | **On-chain (Contract)** | Stores the `interest_rate_bps` parameter verbatim. For new Fixed-rate loans, the rate passed in is the **reputation tier rate** fetched from the Reputation contract. The lending contract does **not** compute any blended or curve-adjusted rate on-chain. | `contracts/lending/src/lib.rs` (`create_loan_request`), `contracts/borrower_reputation/src/lib.rs` (`calculate_interest_rate`) |
+| **Origination (API)** | Computes the **binding** APR written to `loans.apr_bps`, from the admin-managed schedule described in [§3.5](#35-admin-managed-origination-schedule-issue-321). This is the rate the borrower actually pays. | `lib/loans/rate-config.ts`, `app/api/loans/apply/route.ts` |
 | **Frontend (Dashboard)** | Computes **suggested/display** rates using the utilization curve and fixed premium. These are guidance values shown in the UI to help borrowers decide. | `lib/dashboard/interest-rates.ts` (`computeFixedRate`, `computeFloatingRate`) |
 
 ### 3.2 Fixed Rate
@@ -212,6 +214,41 @@ loan.remaining_due = new_total_due.checked_sub(paid_so_far).unwrap();
 loan.interest_rate_bps = new_rate_bps;
 loan.last_rate_update = now;
 ```
+
+### 3.5 Admin-Managed Origination Schedule (issue #321)
+
+The APR written to `loans.apr_bps` at application time comes from the
+`interest_rate_configs` table, not from constants in the route handler. Admins
+retune rates at **/dashboard/admin/rates** without a deployment.
+
+There is one **active** row per rate model. Rows are append-only and versioned:
+publishing deactivates the previous row and inserts the next version, so the
+exact numbers any loan was priced against stay readable.
+
+**Resolution order** (`lib/loans/rate-config.ts` — `priceLoanApr`):
+
+$$R_{\text{origination}} = \text{clamp}\Big(\Big\lfloor \frac{R_{\text{tier}} \times M_{\text{rep}}}{10000} \Big\rceil,\; R_{\text{min}},\; R_{\text{max}}\Big)$$
+
+| Symbol | Source | Description |
+|---|---|---|
+| $R_{\text{tier}}$ | `amount_tiers` | APR of the **highest** `minAmount` the principal reaches (`amount >= minAmount`); falls back to `base_apr_bps` when no tier matches |
+| $M_{\text{rep}}$ | `reputation_tiers` | Multiplier in bps of the **highest** `minScore` the borrower's trust score reaches; `10000` = $1.00\times$, so `9000` is a $10\%$ discount. Defaults to `10000` when no tier matches |
+| $R_{\text{min}}$, $R_{\text{max}}$ | `min_apr_bps`, `max_apr_bps` | Hard clamps applied last |
+
+**Retroactivity.** Every loan records the schedule version it was quoted under
+in `loans.metadata.rate_config_version`, alongside the `apr_bps` column written
+once at creation. Publishing a new schedule therefore **never** reprices a
+pending or active fixed-rate loan. Floating-rate loans track the live schedule
+by design and are repriced on their next recalculation ([§3.4](#34-floating-rate-recalculation-on-chain)).
+
+**Degradation.** When the table is unreachable or unseeded, origination falls
+back to `DEFAULT_RATE_CONFIGS`, which reproduces the pre-#321 hardcoded ladder
+exactly (including its strict `amount > 1000` boundaries). Fallback quotes carry
+version `0`, and the admin dashboard warns when it is in effect.
+
+**Safety bounds** (`RATE_CONFIG_BOUNDS`): APRs $[0\%, 100\%]$, multipliers
+$[0.10\times, 3.00\times]$, at most 10 tiers per ladder, and a rationale of at
+least 5 characters recorded with every publish.
 
 ---
 

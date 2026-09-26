@@ -61,6 +61,7 @@ export const taskStatusEnum = pgEnum("task_status", [
 ]);
 export const taskDifficultyEnum = pgEnum("task_difficulty", ["easy", "medium", "hard"]);
 export const riskDecisionEnum = pgEnum("risk_decision", ["allow", "manual_review", "reject"]);
+export const rateModelEnum = pgEnum("rate_model", ["fixed", "floating"]);
 export const referralStatusEnum = pgEnum("referral_status", [
   "pending",
   "qualified",
@@ -348,6 +349,60 @@ export const loanFundings = pgTable(
   ],
 );
 
+// ─── Interest rate configuration (issue #321) ─────────────────────────────────
+
+/**
+ * Admin-tunable APR schedule, one active row per rate model.
+ *
+ * Replaces the hardcoded APR ladder that used to live in
+ * app/api/loans/apply/route.ts so rates can track market conditions without a
+ * deployment. Rows are append-only and versioned: publishing a new schedule
+ * deactivates the previous row rather than mutating it, which keeps the exact
+ * numbers a loan was priced against readable forever (loans store the version
+ * they were quoted under in `loans.metadata.rate_config_version`).
+ *
+ * `amountTiers` is an ordered ladder of `{ minAmount, aprBps }` — the pricing
+ * code picks the highest `minAmount` the principal clears, so larger loans can
+ * be rewarded with cheaper money. `reputationTiers` is an ordered ladder of
+ * `{ minScore, multiplierBps }` applied to that APR (10000 = 1.00x), so a
+ * trusted borrower pays less than a new one on the same principal.
+ * See lib/loans/rate-config.ts for the shapes and the resolution order.
+ */
+export const interestRateConfigs = pgTable(
+  "interest_rate_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    rateModel: rateModelEnum("rate_model").notNull(),
+    /** Monotonically increasing per rate model; quoted loans record this. */
+    version: integer("version").notNull().default(1),
+    /** Only one row per rate model may be active at a time. */
+    isActive: boolean("is_active").notNull().default(true),
+    /** APR floor in bps used when no amount tier matches (e.g. 1500 = 15%). */
+    baseAprBps: integer("base_apr_bps").notNull(),
+    /** Hard clamps applied after tiers and multipliers, in bps. */
+    minAprBps: integer("min_apr_bps").notNull().default(0),
+    maxAprBps: integer("max_apr_bps").notNull().default(10000),
+    /** Ordered `{ minAmount, aprBps }[]` ladder, cheapest-for-largest. */
+    amountTiers: jsonb("amount_tiers").notNull().default(sql`'[]'::jsonb`),
+    /** Ordered `{ minScore, multiplierBps }[]` ladder; 10000 = 1.00x. */
+    reputationTiers: jsonb("reputation_tiers").notNull().default(sql`'[]'::jsonb`),
+    /** Why this schedule was published — shown in the admin audit trail. */
+    notes: text("notes"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    /** Email captured at publish time so history survives user deletion. */
+    updatedByEmail: text("updated_by_email"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("interest_rate_configs_model_version_key").on(t.rateModel, t.version),
+    uniqueIndex("interest_rate_configs_active_model_key")
+      .on(t.rateModel)
+      .where(sql`${t.isActive}`),
+    index("idx_interest_rate_configs_model_created_at").on(t.rateModel, t.createdAt),
+  ],
+);
+
 // ─── Risk and fraud ───────────────────────────────────────────────────────────
 
 export const riskAssessments = pgTable(
@@ -604,3 +659,4 @@ export type Referral = typeof referrals.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type FraudSignal = typeof fraudSignals.$inferSelect;
 export type RiskAssessment = typeof riskAssessments.$inferSelect;
+export type InterestRateConfigRow = typeof interestRateConfigs.$inferSelect;
