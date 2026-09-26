@@ -8,6 +8,7 @@ import { getLoanLenders } from "@/lib/loans/lenders";
 import { MAX_LENDERS_PER_REPAYMENT } from "@/lib/loans/funding";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { calculateEarlyRepayment, getElapsedDays } from "@/lib/dashboard/interest-rates";
+import { getPlatformFeeBps, resolveLoanFeeBps } from "@/lib/platform/settings";
 
 /**
  * GET /api/loans/repay/preflight?loanId=...&daysElapsed=...
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
         aprBps: loans.aprBps,
         durationDays: loans.durationDays,
         createdAt: loans.createdAt,
+        metadata: loans.metadata,
       })
       .from(loans)
       .where(and(eq(loans.id, loanId), eq(loans.borrowerId, user.id)))
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest) {
       apr_bps: loanRow.aprBps,
       duration_days: loanRow.durationDays,
       created_at: loanRow.createdAt.toISOString(),
+      metadata: loanRow.metadata,
     };
 
     const repayableStatuses = ["active", "funded", "approved"];
@@ -93,13 +96,22 @@ export async function GET(request: NextRequest) {
       ? Math.max(1, Math.min(durationDays, Number(daysElapsedParam)))
       : computedElapsed;
 
+    // Same resolution the POST route uses (issue #324), so the quote the
+    // borrower signs against and the amount they are charged always agree.
+    const activeFeeSetting = await getPlatformFeeBps(db);
+    const resolvedFee = resolveLoanFeeBps({
+      principal,
+      loanMetadata: loan.metadata,
+      activeSetting: activeFeeSetting,
+    });
+
     const earlyRepayment = calculateEarlyRepayment({
       principal,
       aprBps,
       totalDays: durationDays,
       elapsedDays,
       alreadyPaid,
-      platformFeeBps: 100,
+      platformFeeBps: resolvedFee.feeBps,
     });
 
     const totalInterest   = earlyRepayment.standardInterest;
@@ -129,6 +141,11 @@ export async function GET(request: NextRequest) {
         principal:       +principal.toFixed(7),
         interest:        +totalInterest.toFixed(7),
         platformFee,
+        // Which fee was applied and why — "loan" means it was locked at
+        // origination, "setting" that this loan predates the lock (#324).
+        platformFeeBps:    resolvedFee.feeBps,
+        platformFeePct:    +((resolvedFee.feeBps / 10000) * 100).toFixed(4),
+        platformFeeSource: resolvedFee.source,
         platformWallet:  platformWallet || null,
         totalDue:        totalDueGross,
         alreadyPaid:     +alreadyPaid.toFixed(7),

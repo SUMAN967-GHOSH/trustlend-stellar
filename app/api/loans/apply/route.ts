@@ -149,6 +149,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The platform fee in force right now. Stamped into the loan below so it
+    // stays fixed for this borrower even if an admin changes it later (#324).
+    const originationFee = await getPlatformFeeBps(db);
+
     // ── 3b. Verify the on-chain loan request (mandatory when enabled) ────────
     const [borrowerProfile] = await db
       .select({ walletAddress: profiles.walletAddress })
